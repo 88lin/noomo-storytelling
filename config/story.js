@@ -39,7 +39,7 @@
  *
  * 三、文案简写
  * -------------
- * 每一行配置 = 页面上渲染的一行（换行自动变成 <br>）。行尾加 `\\` 表示「这一
+ * 每一行配置 = 页面上渲染的一行（换行自动变成 <br>）。行尾加 `\` 表示「这一
  * 行还没完」，用来把装饰线、图标单独写一行而不产生多余换行。
  *
  *   [[强调]]            强调（中文默认换色，见 config/site.js 的 typography）
@@ -78,10 +78,10 @@ module.exports = {
       to: { s: 0, half: 100 },
       out: { s: 1 },
       gone: { s: 1, half: 150 },
-      text: `{icon bird mb=20}\\\\
-{line half w=300/200 xs-y=-5 lg-y=0 xs-x=1/2 lg-x=1/3}\\\\
+      text: `{icon bird mb=20}\\
+{line half w=300/200 xs-y=-5 lg-y=0 xs-x=1/2 lg-x=1/3}\\
 世界始终在
-{line lg-only w=500/350 x=10% y=-200%}\\\\
+{line lg-only w=500/350 x=10% y=-200%}\\
 {z}不断[[流变]]，{/z}
 {line half w=412/300 xs-y=8 lg-y=0 xs-x=-10% lg-x=0}`,
     },
@@ -95,11 +95,11 @@ module.exports = {
       out: { s: 2, half: 70 },
       gone: { s: 2, half: 200 },
       text: `{span "inline-block xs:mr-20 lg:mr-166"}引领我们{/span}
-{line lg-only half w=230 x=1/1}\\\\
+{line lg-only half w=230 x=1/1}\\
 {span "inline-block xs:mr-25 lg:mr-110 relative z-2"}穿过[[变化]]、{/span}
-{line lg-only half w=300 lg-x=4/5 xs-x=110%}\\\\
+{line lg-only half w=300 lg-x=4/5 xs-x=110%}\\
 {span "inline-block xs:mr-0 lg:mr-0 relative z-2"}穿过重塑，{/span}
-{line lg-only half w=400 x=4/6}\\\\
+{line lg-only half w=400 x=4/6}\\
 {span "inline-block xs:mr-20 lg:mr-115 relative z-2"}与[[未知]]的，{/span}
 {line half w=600/300 lg-y=-200% xs-y=0 lg-x=-1/3 xs-x=5%}`,
     },
@@ -111,8 +111,8 @@ module.exports = {
       to: { s: 3, half: 400 },
       out: { s: 5 },
       gone: { s: 5, half: 100 },
-      text: `{icon bird2 rotate mb=20}\\\\
-{line half w=320/250 xs-x=-10% lg-x=15%}\\\\
+      text: `{icon bird2 rotate mb=20}\\
+{line half w=320/250 xs-x=-10% lg-x=15%}\\
 而[[故事]]，诞生于
 {line half w=400/200 x=10% y=4}`,
     },
@@ -188,15 +188,15 @@ module.exports = {
       to: { s: 10, base: -30 },
       out: { s: 10, base: 50 },
       gone: { s: 10, base: 170 },
-      text: `{icon flower block mb=26}\\\\
+      text: `{icon flower block mb=26}\\
 最好的[[故事]]
-{line lg-only dark w=280 y=-4}\\\\
+{line lg-only dark w=280 y=-4}\\
 {z}不只是{/z}
-{line lg-only dark w=260}\\\\
+{line lg-only dark w=260}\\
 {z}说给我们听{/z}
-{line lg-only dark w=300 x=-7%}\\\\
+{line lg-only dark w=300 x=-7%}\\
 {z}它邀请我们{/z}
-{line lg-only dark w=300 y=-4 x=-7%}\\\\
+{line lg-only dark w=300 y=-4 x=-7%}\\
 {z}一起[[走进]]故事{/z}
 {line dark w=300 lg-y=-2 xs-x=2% lg-x=7%}`,
     },
@@ -208,7 +208,7 @@ module.exports = {
       to: { s: 17, base: -90, mobile: -100 },
       out: { s: 17, base: -10, mobile: -20 },
       gone: { s: 17, base: 60, mobile: -20 },
-      text: '叙事，远不止于\\n文字本身。',
+      text: '叙事，远不止于\n文字本身。',
     },
     {
       className: 'xs:bottom-1/8 lg:bottom-1/6 left-1/2 -translate-x-1/2',
@@ -219,7 +219,7 @@ module.exports = {
       out: { s: 17, base: 40, mobile: 20 },
       gone: { s: 17, base: 120, mobile: 20 },
       text: `它让一点[[火花]]
-{line lg-only dark w=700 y=-1 x=-8%}\\\\
+{line lg-only dark w=700 y=-1 x=-8%}\\
 {span "inline-block lg:-translate-y-2"}燃成[[燎原之火]]。{/span}
 {line dark w=600/250 xs-y=-4 lg-y=-10 xs-x=10% lg-x=-5%}`,
     },
@@ -233,7 +233,7 @@ module.exports = {
       out: { s: 17, base: 300 },
       gone: { s: 17, base: 400 },
       text: `叙事，是你所见、所闻、所感，
-{line lg-only dark w=900 y=-6 x=-8%}\\\\
+{line lg-only dark w=900 y=-6 x=-8%}\\
 也是你[[亲手参与]]的一切。
 {line dark w=800/250 lg-y=-6 xs-x=25% lg-x=-5%}`,
     },
@@ -252,7 +252,7 @@ module.exports = {
       to: { s: 10, base: 250 },
       out: { s: 11, base: 220, short: -40 },
       gone: { s: 11, base: 420, short: -40 },
-      text: `{icon feather block mb=56/20}\\\\
+      text: `{icon feather block mb=56/20}\\
 {span "inline-block xs:mb-8 lg:mb-0"}怎样才能让故事，真正活在{/span}
 {sz 66/38}体验的[[核心]]？{/sz}{br}`,
     },
@@ -267,7 +267,7 @@ module.exports = {
       out: { s: 11, base: 160 },
       gone: { s: 11, base: 360 },
       text: `{sz 38/26}从[[清晰]]开始{/sz}
-{line dark my=20/10 w=600/300 x=-30%}\\\\
+{line dark my=20/10 w=600/300 x=-30%}\\
 {g}先想清楚，你到底要说什么。{/g}
 {g}无论是发布一款新产品，{/g}
 {g}还是建立情感连接，{/g}
@@ -284,7 +284,7 @@ module.exports = {
       out: { s: 11, base: 230 },
       gone: { s: 11, base: 430 },
       text: `{sz 38/26}让故事[[引领]]设计{/sz}
-{line dark my=20/10 w=500/260 x=-5%}\\\\
+{line dark my=20/10 w=500/260 x=-5%}\\
 {g}每一次动效、每一次交互、{/g}
 {g}每一个画面，都该为叙事服务。{/g}
 {g}如果它无助于讲好故事，{/g}
@@ -301,7 +301,7 @@ module.exports = {
       out: { s: 11, base: 300 },
       gone: { s: 11, base: 500 },
       text: `{sz 38/26}[[试验]]，然后迭代{/sz}
-{line dark my=20/10 w=550/280 x=-30%}\\\\
+{line dark my=20/10 w=550/280 x=-30%}\\
 {g}很多最好的想法，都来自{/g}
 {g}先动手做出来，看看哪里成立，{/g}
 {g}再从那里继续打磨。{/g}`,
@@ -317,7 +317,7 @@ module.exports = {
       out: { s: 11, base: 370 },
       gone: { s: 11, base: 570 },
       text: `{sz 38/26}让体验[[因人而异]]{/sz}
-{line dark my=20/10 w=600/300 x=-15%}\\\\
+{line dark my=20/10 w=600/300 x=-15%}\\
 {g}最好的故事会建立情感连接。{/g}
 {g}无论是借助 AI 个性化，{/g}
 {g}还是定制化的设计细节，{/g}
