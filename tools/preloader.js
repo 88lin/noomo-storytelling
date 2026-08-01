@@ -163,7 +163,7 @@ const FAILSAFE = `<script>
   // 收尾由 Vue 做。这段只处理「引擎侧压根没起来」和「起来了却卡死」。
   //
   // 两条硬规矩：
-  //   1. 引擎侧一旦开始揭幕（__nsPreState === "revealing"）就彻底撔手。
+  //   1. 引擎侧一旦开始揭幕（__nsPreState === "revealing"）就彻底撒手。
   //      否则两边同时收场：这里把节点摘了，Vue 还以为自己拥有它，下一次
   //      更新就往 null 父节点里插东西，控制台报
   //      "Cannot read properties of null (reading 'insertBefore')"。
