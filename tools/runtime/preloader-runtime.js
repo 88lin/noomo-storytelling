@@ -37,7 +37,7 @@
  * 为什么不走 Vue 响应式
  * ----------------------
  * Preloader 的渲染函数把内层节点缓存成了静态 vnode（patch flag -1），
- * Vue 之后根本不会再 patch 它。想让数字变化就得改成动态节点，那会牽动
+ * Vue 之后根本不会再 patch 它。想让数字变化就得改成动态节点，那会牵动
  * 渲染函数、SSR 标记和 hydration 三处。直接写 textContent / CSS 变量
  * 反而是这里最稳的做法 —— 每帧两次 DOM 写入，代价可以忽略。
  *
@@ -92,7 +92,7 @@ const __nsPre = (() => {
 
   // ---- 告诉 index.html 里那段兜底脚本「这边有人管了」---------------------
   // 'live'      引擎侧的驱动在跑，兜底脚本只管等
-  // 'revealing' 揭幕动画已经开始，收尾归 Vue —— 兜底脚本必须彻底撔手
+  // 'revealing' 揭幕动画已经开始，收尾归 Vue —— 兜底脚本必须彻底撒手
   // 少了这个握手，两边会同时收场：兜底脚本把 .preloader 从 DOM 里摘掉，
   // 而 Vue 还认为自己拥有这个节点，下一次更新就会往 null 父节点里插东西
   // （实测报 `Cannot read properties of null (reading 'insertBefore')`）。
@@ -203,7 +203,7 @@ const __nsPre = (() => {
     // 缓动必须按**时间**算，不能按帧数。首屏这段正是主线程最忙的时候
     // （4.3MB 的 v20.glb 在解析、着色器在编译），实测能连着掉到个位数帧率。
     // 早先写成「每帧补 22% 差值」的版本在软件渲染下只跑到 96 就结束了 ——
-    // 慢设备上会看到同样的事。单帧最多补 400ms，避免一次长卡顿把进度掸到底。
+    // 慢设备上会看到同样的事。单帧最多补 400ms，避免一次长卡顿把进度掀到底。
     const dt = Math.min(400, Math.max(0, t - prev));
     prev = t;
     const el = t - S.t0;
@@ -250,7 +250,7 @@ const __nsPre = (() => {
     arm: (fn) => { if (typeof fn === 'function') S.reveal = fn; },
     /**
      * 组件自己的揭幕函数 a() 已经开始跑了（可能是上面 schedule 触发的，
-     * 也可能是上游的 setSceneLoaded）—— 补满到 100，并通知兜底脚本撔手。
+     * 也可能是上游的 setSceneLoaded）—— 补满到 100，并通知兜底脚本撒手。
      */
     done: () => { S.fired = true; flag('revealing'); sprint(); },
     /** 组件卸载 —— 退订 + 停 rAF。 */
