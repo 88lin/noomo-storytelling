@@ -376,7 +376,7 @@ def menu_checks(ctx, page) -> None:
           "菜单真有背景（上游那条规则被 Sass 注释废掉了，实测是完全透明）",
           st["bgImage"][:60])
     check(st["isolation"] == "isolate",
-          "建了独立层叠上下文（噪点层的 z-index:-1 才不会捣穿父级）",
+          "建了独立层叠上下文（噪点层的 z-index:-1 才不会捅穿父级）",
           st["isolation"])
     check(st["afterZ"] == "-1", "噪点层压在内容底下", st["afterZ"])
     check(all(o > 0.6 for o in st["linkOpacity"]) if st["linkOpacity"] else False,
