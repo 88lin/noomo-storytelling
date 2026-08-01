@@ -1,0 +1,42 @@
+{
+  "name": "noomo-storytelling",
+  "version": "2.0.0",
+  "private": true,
+  "description": "可配置的沉浸式 3D 数字叙事网站模板 —— 文案、品牌、排版、滚动节奏、视觉素材全部收敛到 config/ 三个文件，零依赖构建。站点素材由 npm run fetch-src 按需取回，不入库。",
+  "scripts": {
+    "fetch-src": "node tools/fetch-src.js",
+    "prebuild": "node tools/fetch-src.js",
+    "build": "node tools/build.js",
+    "predev": "node tools/fetch-src.js",
+    "dev": "node tools/dev.js",
+    "serve": "node tools/serve.js",
+    "serve:src": "node tools/serve.js src",
+    "pretest": "node tools/fetch-src.js",
+    "test": "node tools/test/run.js",
+    "test:e2e": "python3 tools/test/e2e.py"
+  },
+  "keywords": [
+    "storytelling",
+    "3d-website",
+    "threejs",
+    "webgl",
+    "nuxt",
+    "vue",
+    "gsap",
+    "template",
+    "沉浸式",
+    "数字叙事",
+    "中文",
+    "chinese"
+  ],
+  "author": "88lin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/88lin/noomo-storytelling.git"
+  },
+  "homepage": "https://github.com/88lin/noomo-storytelling#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

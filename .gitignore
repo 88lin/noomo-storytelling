@@ -1,0 +1,32 @@
+# 上游站点快照（由 npm run fetch-src 取回，不入库 —— 版权不属于本项目）
+src/
+
+# 构建产物（由 npm run build 生成，不入库）
+dist/
+
+# 依赖目录（本模板零依赖，此项仅为保险）
+node_modules/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器配置
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日志文件
+*.log
+npm-debug.log*
+
+# 临时文件
+.tmp/
+.temp/
+
+# Python 字节码（跑 e2e 时产生）
+__pycache__/
+*.pyc
