@@ -203,6 +203,15 @@ test('config: 用到 CSS 里不存在的类名时构建失败，并给出相近�
   build(silent);
 });
 
+// Nuxt 把 app.baseURL 烤进首帧 HTML 的内联运行时 config，Vue Router 的 history
+// base 就是它。上游写死 "/"，部署到 user.github.io/<repo>/ 会匹配不到任何路由，
+// 首页只剩错误组件。本地用根路径预览时看不出来，所以这里盯死。
+test('build: Nuxt 运行时 baseURL 跟着 basePath 走', () => {
+  const html = fs.readFileSync(path.join(DIST_DIR, 'index.html'), 'utf8');
+  const hits = html.match(/baseURL:"[^"]*"/g) || [];
+  eq(hits, ['baseURL:"/noomo-storytelling/"'], '首帧 HTML 的 baseURL 不对');
+});
+
 test('config/site.js 的 basePath 必须以 / 开头结尾', () => {
   withFile('config/site.js',
     (s) => s.replace("basePath: '/noomo-storytelling/'", "basePath: 'repo'"),

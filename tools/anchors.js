@@ -67,6 +67,16 @@ function buildAnchors(cfg) {
   add('meta.favicon', 'html',
     '<link rel="icon" type="image/png" href="./fav.png">',
     `<link rel="icon" type="image/png" href="./${meta.favicon.out}">`);
+  // Nuxt 运行时把 app.baseURL 当作站点根：Vue Router 的 history base、app
+  // manifest 的地址、publicAssetsURL() 生成的图标路径，全从这里读。上游把它
+  // 烤死成 "/"，部署到 user.github.io/repo/ 就会连环出事：
+  //   1. 路由 base 还是 "/"，当前地址 /repo/ 匹配不到任何路由，首页直接被
+  //      渲染成 Nuxt 的错误组件 —— 肉眼看就是「打开啥都没有」；
+  //   2. app manifest 去 /_nuxt/builds/meta/*.json 找 → 404；
+  //   3. close.svg、fromError.svg 这些走 publicAssetsURL() 的图标去域名根
+  //      找 → 404。
+  // 三样在根路径预览时都不会暴露，只有真部署到子路径才炸，所以必须烤进去。
+  add('meta.basePath', 'html', 'baseURL:"/"', `baseURL:${JSON.stringify(meta.basePath)}`);
 
   // ------------------------------------------------------------------- hero
   add('hero.headline', 'html',
