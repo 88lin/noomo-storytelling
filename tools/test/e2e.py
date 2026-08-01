@@ -75,6 +75,13 @@ def check(ok: bool, label: str, detail: str = "") -> None:
 class Handler(http.server.SimpleHTTPRequestHandler):
     def translate_path(self, path):  # noqa: D102
         path = path.split("?")[0]
+        if BASE != "/" and not path.startswith(BASE):
+            # 早先这里对 BASE 之外的请求也照常从 dist/ 根发文件，等于把整个站点
+            # 同时挂在 / 和 /sub/ 两处 —— 结果是任何漏掉 basePath 的绝对链接
+            # (/_nuxt/builds/meta/*.json、publicAssetsURL() 出来的图标) 在本地
+            # 都是 200，一上 GitHub Pages 才 404。GitHub Pages 的域名根不属于
+            # 这个仓库，所以这里也必须让它 404。
+            return str(DIST / "__outside_base__")
         if path.startswith(BASE):
             path = "/" + path[len(BASE):]
         return super().translate_path(path)
@@ -172,6 +179,16 @@ def static_checks() -> None:
               "SSR 标记里没有标签间空白（Vue 会把它当成多余文本节点）")
         check(re.search(r'class="ns-pre-val"[^>]*>0<', frag) is not None,
               "百分比初值是 0")
+    # ---- 子路径部署：Nuxt 运行时的 app.baseURL 必须等于 basePath
+    # Vue Router 的 history base、app manifest 地址、publicAssetsURL() 都读它。
+    # 留在上游的 "/" 上，站点部署到 user.github.io/repo/ 会匹配不到路由，首页
+    # 直接渲染成错误组件（肉眼就是一片空白）。
+    base_urls = re.findall(r'baseURL:"([^"]*)"', html)
+    check(len(base_urls) == 1, "首帧 HTML 里 baseURL 恰好一处", str(base_urls))
+    check(bool(base_urls) and base_urls[0] == BASE,
+          "Nuxt 运行时 baseURL 等于部署子路径（否则路由 base 错，整页只剩错误组件）",
+          f"实际 {base_urls[0]!r}  期望 {BASE!r}" if base_urls else "没找到")
+
     check("hideReadyPreloader" not in html,
           "克隆那段自己写的轮询卸载脚本已经拿掉")
     check("__nsPreBoot" in html,
