@@ -1,0 +1,67 @@
+name: 构建并发布到 GitHub Pages
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+# 允许 Actions 写入 Pages 部署
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只跑一个部署；排队中的旧任务直接取消
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # 本模板零 npm 依赖，故意不跑 npm ci / npm install
+
+      - name: 拉取上游站点快照到 src/
+        run: node tools/fetch-src.js
+
+      - name: 单元测试
+        run: node tools/test/run.js
+
+      - name: 构建静态站点
+        run: node tools/build.js
+
+      - name: 校验产物
+        run: |
+          test -f dist/index.html || { echo "缺少 dist/index.html"; exit 1; }
+          test -f dist/404.html   || { echo "缺少 dist/404.html";   exit 1; }
+          test -f dist/.nojekyll  || { echo "缺少 dist/.nojekyll";  exit 1; }
+          echo "产物文件数：$(find dist -type f | wc -l)"
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    name: 部署
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
