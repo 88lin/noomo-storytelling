@@ -15,7 +15,7 @@ Python + Playwright 跑，不进 package.json 的依赖。
     3  外部项目链接走新标签页，不触发前端路由；留空的不可点击
     4  子路径部署（/sub/）下没有 404
     5  加载页：SSR 首帧就有骨架、百分比从 0 单调涨到 100、揭幕后节点离开 DOM
-    6  移动端菜单：打开后真有背景，实拍像素上白字对比度 ≥ 4.5:1
+    6  移动端菜单：打开后真有背景，frost/ink 实拍像素上白字对比度 ≥ 7:1
     7  水晶：构建产物里 crystalHovers 恰好 7 组、色相拉得开
     8  控制台无报错、无注水不匹配警告
 
@@ -215,7 +215,9 @@ def static_checks() -> None:
     style = html[html.index('<style id="ns-theme">'):]
     style = style[:style.index("</style>")]
     for frag_txt, label in [
-        (".preloader.preloader{background:", "加载页背景被覆盖（上游那片淡紫没了）"),
+        # editorial 铺的是 background-color + 两团 radial-gradient，progress/legacy
+        # 走单条 background，所以这里只认前缀，不锁到冒号。
+        (".preloader.preloader{background", "加载页背景被覆盖（上游那片淡紫没了）"),
         (".mobile-menu.mobile-menu", "移动端菜单背景规则已注入"),
         (".ns-pre-bar", "进度条样式已注入"),
     ]:
@@ -223,7 +225,7 @@ def static_checks() -> None:
 
     cfg = load_config("site.js")
     pre_style = cfg.get("preloader", {}).get("style", "editorial")
-    menu_mode = cfg.get("menu", {}).get("background", "ink")
+    menu_mode = cfg.get("menu", {}).get("background", "frost")
     if pre_style == "editorial":
         # 数字本身就是进度条：墨色填到 --ns-pre-p，剩下的是淡墨。
         check("background-clip:text" in style,
@@ -240,6 +242,38 @@ def static_checks() -> None:
               "editorial：分界点把左右 padding 从映射里减了回去")
         check("var(--font-serif)" in style and "font-style:italic" in style,
               "editorial：数字是衬线斜体")
+
+    if menu_mode == "frost":
+        # frost 的骨架：四团彩晕 + 暗网格 + 颗粒 + 上置序号。少一层就不是磨砂了。
+        for frag_txt, label in [
+            ("counter-reset:ns-menu", "frost：导航列建了计数器"),
+            ("content:counter(ns-menu,decimal-leading-zero)",
+             "frost：序号是计数器生成的，没跟条目数绑死"),
+            ("--ns-menu-gut:max(24px,", "frost：量度变量在（导航左对齐收在量度内）"),
+            ("radial-gradient(", "frost：彩晕层在"),
+            ("feTurbulence", "frost：颗粒是 feTurbulence 现生成的，不是外链贴图"),
+            ("isolation:isolate", "frost：建了独立层叠上下文（颗粒层 z-index:-1 才不捅穿）"),
+            ("a:focus-visible{outline", "frost：补了键盘焦点框（上游整站一次没写过）"),
+        ]:
+            check(frag_txt in style, label)
+        # 序号打在条目「上方」靠的是 ::before + display:block，不是 ::after。
+        i_a = style.index(">a::before{")
+        check("display:block" in style[i_a:i_a + 200],
+              "frost：序号走 ::before 且是块级（打在条目上方，不是右侧）",
+              style[i_a:i_a + 60])
+        # 四角各一团，缺一角就成了斜向渐变。
+        corners = ["at 0% 0%", "at 100% 0%", "at 0% 100%", "at 100% 100%"]
+        check(all(c in style for c in corners),
+              "frost：四个角都有彩晕（缺角就退化成斜向渐变）",
+              str([c for c in corners if c not in style]))
+        # 暗网格：黑线不吃亮度预算，白线会。写成白的等于把彩晕的色度砍掉一半。
+        check("rgba(0,0,0,.14)" in style,
+              "frost：网格是黑线（白线会占掉彩晕的亮度预算）")
+        # 菜单背后是全屏 3D 场景，模糊它拿不到磨砂质感还白烧一帧 GPU。
+        check("backdrop-filter" not in style,
+              "frost：没有 backdrop-filter（背后是 3D 场景，模糊它纯亏）")
+        check("transition-delay" not in style,
+              "frost：错峰复用上游的 delay-200/250/300/350，没另起一套")
 
     if menu_mode == "ink":
         # 这三条是 ink 版式的骨架，任何一条掉了都会退回「一堆居中链接」。
@@ -417,7 +451,15 @@ MENU_PROBE = """() => {
     // ::after 里的 counter() 在 computed style 里不求值，拿到的是字面量，
     // 所以这里连同 counter-increment 一起看，三样对上才算序号真的接上了。
     numContent: a0 ? getComputedStyle(a0, '::after').content : '',
+    // frost 把序号挪到条目上方，走的是 ::before。两个伪元素都取，按预设分别断言。
+    numContentBefore: a0 ? getComputedStyle(a0, '::before').content : '',
+    numDisplayBefore: a0 ? getComputedStyle(a0, '::before').display : '',
     numIncrement: a0 ? getComputedStyle(a0).counterIncrement : '',
+    // 颗粒层：透明度和背景图都在 ::after 上，data URI 里应当是内联 SVG。
+    afterOpacity: af.opacity,
+    afterBgImage: af.backgroundImage,
+    // frost 的下划线由 background-size 从 0 拉到满宽（不是 border，不占布局）。
+    linkBgSize: a0 ? getComputedStyle(a0).backgroundSize : '',
     linkBorderTop: a0 ? getComputedStyle(a0).borderTopWidth : '',
     linkPadLeft: a0 ? getComputedStyle(a0).paddingLeft : '',
     linkTransform: a0 ? getComputedStyle(a0).transform : '',
@@ -580,15 +622,55 @@ def menu_checks(ctx, page, mode: str) -> None:
         check(st["linkTransform"] in ("none", "matrix(1, 0, 0, 1, 0, 0)"),
               "ink：菜单打开后条目已归位（没有卡在起始位移上）",
               st["linkTransform"])
+    elif mode == "frost":
+        check(st["afterZ"] == "-1", "frost：颗粒层压在内容底下", st["afterZ"])
+        # 颗粒是内联 SVG data URI。外链贴图会多一次请求，而且离线就没了。
+        check("data:image/svg+xml" in st["afterBgImage"],
+              "frost：颗粒是内联 SVG data URI（不额外发请求）",
+              st["afterBgImage"][:60])
+        # 标定出来的暗面强度是 .179；跑偏了要么是雪花要么是看不见。
+        op = float(st["afterOpacity"] or 0)
+        check(0.10 <= op <= 0.30,
+              "frost：颗粒强度落在标定区间内（太高是电视雪花，太低等于没有）",
+              st["afterOpacity"])
+        # 四团彩晕 + 两层网格 = 六层背景图。computed 里能直接数。
+        check(st["bgImage"].count("radial-gradient") == 4,
+              "frost：四团彩晕都进了 computed 背景",
+              str(st["bgImage"].count("radial-gradient")))
+        check(st["bgImage"].count("linear-gradient") >= 2,
+              "frost：横竖两向网格都在",
+              str(st["bgImage"].count("linear-gradient")))
+        check(st["linkCount"] == 4, "frost：四条导航都在索引表里", str(st["linkCount"]))
+        check(st["navCounterReset"].startswith("ns-menu"),
+              "frost：导航列建了计数器", st["navCounterReset"])
+        check(st["numIncrement"].startswith("ns-menu"),
+              "frost：链接自增计数器", st["numIncrement"])
+        check("counter(ns-menu" in st["numContentBefore"],
+              "frost：序号由 ::before 的计数器生成（computed 里 counter() 不求值）",
+              st["numContentBefore"])
+        check(st["numDisplayBefore"] == "block",
+              "frost：序号是块级，落在条目上方", st["numDisplayBefore"])
+        # 菜单打开态下划线应当已经拉满；宽度是 100% 而不是 0。
+        check(st["linkBgSize"].startswith("100%"),
+              "frost：菜单打开后下划线已拉到满宽", st["linkBgSize"])
+        check(st["backdrop"] == "",
+              "frost：CSSOM 里没有 backdrop-filter 声明（背后是 3D 场景，模糊它纯亏）",
+              st["backdrop"])
+        check(len(set(st["linkDelays"])) == 4,
+              "frost：错峰入场还在（复用上游 delay-*，没被覆盖成同一个值）",
+              str(st["linkDelays"]))
     else:
         check(st["afterZ"] == "-1", "噪点层压在内容底下", st["afterZ"])
 
+    # frost / ink 是压着白字算过对比度的（构建期低于 7:1 直接报错），实拍也按 7 收；
+    # 其余预设只守 AA。
+    floor = 7.0 if mode in ("frost", "ink") else 4.5
     png = page.screenshot()
     px = sample_pixels(ctx, png, SAMPLE_POINTS)
     ratios = [contrast((255, 255, 255), c) for c in px]
     worst = min(ratios)
-    check(worst >= 4.5,
-          "实拍像素上白字对比度 ≥ 4.5:1（AA）",
+    check(worst >= floor,
+          f"实拍像素上白字对比度 ≥ {floor:g}:1",
           f"最差 {worst:.2f}:1  采样 {[f'{r:.1f}' for r in ratios]}")
 
 
@@ -603,7 +685,7 @@ def main() -> int:
     expected = story_texts()
     BASE = site["meta"].get("basePath", "/")
     pre_style = site.get("preloader", {}).get("style", "editorial")
-    menu_mode = site.get("menu", {}).get("background", "ink")
+    menu_mode = site.get("menu", {}).get("background", "frost")
 
     static_checks()
 
