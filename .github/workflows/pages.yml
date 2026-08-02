@@ -11,10 +11,12 @@ permissions:
   pages: write
   id-token: write
 
-# 同一时间只跑一个部署；排队中的旧任务直接取消
+# 同一时间只跑一个部署。注意 cancel-in-progress 必须是 false：
+# 半路抠掉一次正在进行的 Pages 部署，线上会停在上一版甚至留下失败状态，
+# 后面那次排队的构建反而要等更久。让它排队跑完更稳。
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
