@@ -17,7 +17,7 @@ dist/             可直接部署的静态站点（GitHub Pages / 任意静态�
 <p align="left">
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A518-3c873a">
   <img alt="依赖" src="https://img.shields.io/badge/npm%20%E4%BE%9D%E8%B5%96-0-blue">
-  <img alt="单元测试" src="https://img.shields.io/badge/%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95-248-brightgreen">
+  <img alt="单元测试" src="https://img.shields.io/badge/%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95-279-brightgreen">
   <img alt="端到端" src="https://img.shields.io/badge/%E7%AB%AF%E5%88%B0%E7%AB%AF-125-brightgreen">
   <img alt="工具层许可" src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E5%B1%82-MIT-lightgrey">
 </p>
@@ -31,10 +31,10 @@ dist/             可直接部署的静态站点（GitHub Pages / 任意静态�
 | [⚠️ 一、先读：素材与字体的授权](#️-一先读素材与字体的授权) | 哪些能用、哪些不能，先看这个 |
 | [🚀 二、快速开始](#-二快速开始) | 五条命令跑起来 |
 | [⚙️ 三、三个配置文件](#️-三三个配置文件) | 🏷 site / ✍️ story / 🎬 scene |
-| [🎨 四、三项视觉设计](#-四三项视觉设计) | 📜 加载页 / 🌑 移动端菜单 / 💎 水晶 |
+| [🎨 四、三项视觉设计](#-四三项视觉设计) | 📜 加载页 / ❄️ 移动端菜单 / 💎 水晶 |
 | [🌐 五、部署](#-五部署) | GitHub Pages 与子路径那个坑 |
 | [🔧 六、工作原理](#-六工作原理) | 黑盒替换管线怎么跑的 |
-| [🧪 七、测试](#-七测试) | 248 + 125，以及验不了的部分 |
+| [🧪 七、测试](#-七测试) | 279 + 125，以及验不了的部分 |
 | [🗂 八、目录结构](#-八目录结构) | 文件放在哪 |
 | [🧭 九、常见操作速查](#-九常见操作速查) | 想改 X 去哪改 |
 | [🐞 十、已知问题与限制](#-十已知问题与限制) | 上游的坑与环境的坑 |
@@ -78,7 +78,7 @@ npm run fetch-src # 首次必跑：拉取上游站点快照到 src/（70 个文�
 npm run build     # 构建到 dist/（70 个文件，约 11.2 MB）
 npm run serve     # 本地预览 dist/（端口 3000，自动挂在配置的 basePath 下）
 npm run dev       # 边改边看：监听 config/ 与 tools/，改完自动重建 + 浏览器自动刷新
-npm test          # 248 项单元测试（纯 Node，无依赖）
+npm test          # 279 项单元测试（纯 Node，无依赖）
 npm run test:e2e  # 可选：125 项真浏览器验收（需 Python + Playwright）
 ```
 
@@ -96,7 +96,7 @@ npm run test:e2e  # 可选：125 项真浏览器验收（需 Python + Playwright
   故事块     smallLight 3 / smallDark 4 / big 4 / lines 6 / cases 7
   滚动段落   20 段，桌面合计 4230，移动端合计 3715
   强调样式   accent
-  菜单背景   ink（白字对比度 15.5:1）
+  菜单背景   frost（白字对比度 7:1）
   加载页     editorial（象牙纸排印）
   水晶       prism（棱镜）
   文件       70 个（其中 0 个由 config 替换）
@@ -129,7 +129,7 @@ module.exports = {
   cursor: { case: '查看项目', start: '点击开始' },
   footer: { tagline: '让我们以应有的方式，帮你讲述你的故事' },
   preloader: { … },   // 见「📜 加载页」
-  menu:      { … },   // 见「🌑 移动端菜单」
+  menu:      { … },   // 见「❄️ 移动端菜单」
   errorPage: { message: '别在这儿迷路，回首页看看', rights: '© 版权所有', backAlt: '返回首页' },
   typography: {
     emphasis: 'accent',              // accent | gradient | italic | none
@@ -260,7 +260,7 @@ preloader: {
 
 | 预设 | 观感 |
 | --- | --- |
-| `editorial` | **象牙纸排印（默认）**：暖白纸底、左上角小标记、一个占满视口的巨大斜体衬线数字，数字随进度**从左到右由淡墨转浓墨**，底部一条 1px 发丝进度线 |
+| `editorial` | **象牙纸排印（默认）**：暖白纸底、680px 版心、版心左上角一枚 48px 标记，一个撑满版心的巨大斜体衬线数字，数字随进度**从左到右由淡墨转浓墨**，底部一条 1px 静态发丝线收边 |
 | `progress` | 深蓝品牌渐变 + 极光光斑 + 居中百分比与进度条 |
 | `legacy` | 原样不动，上游那张紫色渐变 |
 
@@ -269,9 +269,17 @@ preloader: {
 4% 的补偿，配合等量的 `padding` / 负 `margin`，避免字形侧边承（side bearing）被裁掉。
 不支持 `background-clip:text` 的浏览器走 `@supports` 兜底，数字直接是纯墨色。
 
-淡墨色不是手填的，是按纸色**反解**出来的（`solveFaint`）：在 `#f2ede3` 上求出对比度
-恰好 ≥ 3:1 的最深灰，当前配色下解得 `#8c8881`（3.023:1）。纸墨对比度低于 7:1 会**直接
-报错而不是降级**，因为加载页是整站唯一一屏纯文字。
+淡墨色不是手填的，是按纸色**反解**出来的（`solveFaint`），而且算的不是名义纸色，是
+**最暗那一档纸**（`worstPaper`）—— 纸面铺了两团柔光渐变又压了一层颗粒，最暗处实测
+`#e1ded7`，按名义纸色算会整整高估一档。当前配色下解得两个值：小字 `#64625d`（对最坏纸
+4.53:1，过 AA 正文线）、数字未填充的那一半 `#817e79`（对最坏纸 3.01:1，够看清轮廓又不
+抢已填充的部分，两半明度差 4.62:1）。纸墨对比度低于 7:1 会**直接报错而不是降级**，
+因为加载页是整站唯一一屏纯文字。
+
+底部那条发丝线**故意是静态的**，不跟着百分比跑。试过让它带进度，不成立：数字的墨色
+分界点由 `background-clip:text` 决定，实际位置取决于字形的内容宽度，而 CSS 没有办法把
+这个宽度传给兄弟元素 —— 86% 那一帧线已经跑到 585px，数字的分界还在 351px，差 244px，
+读起来就是「线比数字快」。所以线退回去只当版心收边，进度全交给数字自己表达。
 
 百分比是**真实**的：运行时订阅引擎自己的 `loading.progress` / `loading.complete`
 事件，按 `loaded/total` 映射。引擎包本身还在下载、事件还没开始发的那一段，由一小段
@@ -286,27 +294,41 @@ preloader: {
 > 现在换成了双向握手：运行时自己判定就绪 → 调组件自己的揭幕函数 → 由 Vue 正常卸载；
 > 兜底脚本只做透明度过渡然后 `visibility:hidden`，**绝不摘节点**。
 
-### 🌑 4.2 移动端菜单背景 `config/site.js → menu`
+### ❄️ 4.2 移动端菜单背景 `config/site.js → menu`
 
 ```js
 menu: {
-  background: 'ink',        // ink | aurora | gradient | frost | none
-  ink: '#0c0c0e',           // ink：墨色底
-  index: true,              // ink：条目右侧的 01 / 02 / 03 序号
+  background: 'frost',      // frost | ink | aurora | gradient | none
+  ink: '#0c0c0e',           // frost / ink：墨色底
+  index: true,              // frost / ink：条目的 01 / 02 / 03 序号
+  bloom: ['#0055ba', '#8000e0', '#a9007b', '#b4003b'],  // frost：四角彩晕
+  grid: true,               // frost：暗网格（黑线不占亮度预算）
   colors: ['#00276e', '#143a8a', '#062969'],      // aurora / gradient
   glow: ['#4edbef', '#88aeff', '#6248a4'],        // aurora
-  noise: true,              // 细噪点，压掉大面积渐变的色带（ink 不叠）
+  noise: true,              // 颗粒（normal 混合，std≈3.2/255）
   motion: true,             // 极光缓慢漂移；false 则完全静止
 }
 ```
 
 | 预设 | 观感 |
 | --- | --- |
-| `ink` | **墨玻璃索引（默认）**：近黑墨色 + `backdrop-filter: blur(26px) saturate(110%)`，四条导航拉成满宽横排、上下各一条发丝线，右侧用 CSS 计数器打 `01`–`04` 序号，打开时错峰上浮归位 |
+| `frost` | **带颜色的磨砂（默认）**：四角各一团全饱和彩晕（蓝 → 紫 → 玫 → 红）压在近黑墨底上，叠 64px 暗网格和一层胶片颗粒。导航左对齐竖排，序号打在条目上方，下划线从 0 拉到满宽 |
+| `ink` | 墨玻璃索引：近黑墨色 + `backdrop-filter: blur(26px) saturate(110%)`，四条导航拉成满宽横排、上下各一条发丝线，右侧打 `01`–`04` 序号 —— 克制版，不想要颜色时用它 |
 | `aurora` | 深蓝品牌渐变 + 三团极光光斑 + 噪点，缓慢漂移 |
 | `gradient` | 同一套色，但不漂移、不发光，最省电 |
-| `frost` | 毛玻璃，透出底下的 3D 场景 |
 | `none` | 一行 CSS 都不输出，回到上游状态 |
+
+`frost` 的四角色不是挑好看挑出来的，是解出来的：白字对彩晕峰值必须 ≥ 7:1，在
+OKLCh 里按色相逐格二分，求每个色相在这条线下能吃到的最大彩度。结果很不对称 ——
+暗底上紫红半圈能上色（h=280 时 C 上限 .295），青绿橙半圈几乎上不了（h=200 时
+只有 .077，差近 4 倍）。四角因此取 h=258 / 300 / 345 / 15，全部贴着 7.0:1 落位。
+同样的对比度预算下，四角有效色的色彩跨度是上一版的 3.2 倍。
+
+`frost` 的细节：颗粒用 `feTurbulence` 生成、`normal` 混合（`overlay` 在暗底放大端会
+炸成电视雪花），逐通道标准差标定到 2.7–3.2/255；对比度门把「无颗粒 / 颗粒均值 /
+颗粒 +2σ」三态都算一遍取最坏 —— 因为颗粒在四角彩晕峰值处其实是**压暗**的，只算
+均值会漏掉 6.1:1 那一档。`frost` 不用 `backdrop-filter`：菜单后面是全屏 3D 场景，
+模糊它既拿不到磨砂质感又白烧一帧 GPU。
 
 `ink` 的细节：序号走 `counter-reset` / `counter-increment` / `counter(ns-menu,
 decimal-leading-zero)`，加减导航项不用改 CSS；左右留白用
@@ -322,8 +344,8 @@ decimal-leading-zero)`，加减导航项不用改 CSS；左右留白用
 **完全没有背景**，看到的是底下的 3D 场景。构建时不动那两处坏规则，而是在
 `<style id="ns-theme">` 里用 `.mobile-menu.mobile-menu` 提权覆盖。
 
-对比度是构建期算的（`ink` 当前 **15.5:1**），五套预设都会打印到构建摘要里；
-`ink` 低于 7:1 直接报错，其余预设低于 4.5:1（AA）告警。
+对比度是构建期算的（`frost` 最坏 **7.0:1**、`ink` **15.4:1**），五套预设都会打印到
+构建摘要里；`frost` 与 `ink` 低于 7:1 直接报错，其余预设低于 4.5:1（AA）告警。
 
 ### 💎 4.3 水晶配色 `config/scene.js → crystals`
 
@@ -485,13 +507,13 @@ src/_nuxt/story.data.js   ← 构建时新生成：5 个故事数组
 ## 🧪 七、测试
 
 ```bash
-npm test          # 248 项单元测试
+npm test          # 279 项单元测试
 npm run test:e2e  # 125 项真浏览器验收
 ```
 
 | 层 | 数量 | 覆盖 |
 | --- | --- | --- |
-| 单元（纯 Node，零依赖） | **248** | DSL 编译、位置求值、锚点唯一性与产物断言、故事块、场景 payload、类名白名单、加载页、菜单、水晶、构建产物 |
+| 单元（纯 Node，零依赖） | **279** | DSL 编译、位置求值、锚点唯一性与产物断言、故事块、场景 payload、类名白名单、加载页、菜单、水晶、颗粒标定与最坏对比度模型、构建产物 |
 | 端到端（Playwright） | **125** | 注水后中文没被换回英文、外链行为与 `rel`、子路径无 404、404 页、加载页真实进度、菜单实拍像素对比度、控制台零报错 |
 
 e2e 需要 `pip install playwright && playwright install chromium`，**故意不作为构建依赖**。
@@ -524,6 +546,7 @@ tools/
   preloader.js   加载页三套预设的 CSS 与锚点
   menu.js        移动端菜单五套预设的 CSS 与对比度校验
   crystals.js    水晶六套预设 + crystalRests 逐颗静止态注入
+  grain.js       胶片颗粒生成与标定、彩晕/网格叠层的最坏对比度模型
   color.js       色彩换算与对比度求解
   scene.js       场景配置 → 引擎 payload
   payload.js     引擎 payload 的读写与转义
@@ -534,7 +557,7 @@ tools/
   runtime/story-runtime.js      注入引擎的故事数据读取器
   runtime/preloader-runtime.js  加载页真实进度与揭幕握手
   fetch-src.js   从快照仓库固定提交取回 src/（70 个文件）
-  test/          248 项单元测试 + e2e.py（125 项 Playwright 验收）
+  test/          279 项单元测试 + e2e.py（125 项 Playwright 验收）
 docs/
   改造说明.md    从克隆站到模板的完整改造记录
   代码审查.md    全仓审查结论、已修问题、不改的理由、环境限制
@@ -586,8 +609,8 @@ dist/            构建产物（已在 .gitignore 中）
   滚动进不到那一屏。水晶只能真机验收。
 - **`backdrop-filter` 在软件渲染里被算成 `none`**，但 `CSS.supports` 仍报 true。
   e2e 因此改成验 CSSOM 里的声明，而不是 computed style。
-- **`::after` 的 `counter()` 在 computed style 中不求值**，菜单序号只能断言字面量与
-  `counter-increment` / `counter-reset`。
+- **伪元素里的 `counter()` 在 computed style 中不求值**（`frost` 走 `::before`、
+  `ink` 走 `::after`），菜单序号只能断言字面量与 `counter-increment` / `counter-reset`。
 
 ---
 
