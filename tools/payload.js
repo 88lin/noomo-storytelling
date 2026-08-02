@@ -124,7 +124,11 @@ function write(html, patch) {
     });
   }
 
-  const json = JSON.stringify(flat);
+  // JSON.stringify 不转义 `<`。眼下写进 payload 的只有枚举串、布尔和数字，
+  // 不可能带尖括号；但只要将来往这里加一个自由文本字段，正文里一个
+  // `</script>` 就能把整页 HTML 提前截断。`\u003C` 在 JSON 里与 `<` 完全
+  // 等价（下面的回读校验也照样通过），先把这个口子堵上。
+  const json = JSON.stringify(flat).replace(/</g, '\\u003C');
   const patched = html.replace(RE_SCRIPT, () => `${match[1]}${json}${match[3]}`);
 
   // Read back and confirm the graph now says what the config asked for.

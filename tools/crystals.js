@@ -11,6 +11,7 @@
  *
  * 消费代码在 `class Jh` 的构造函数里：
  *
+ *   this.id = e;                                  // "crystal0" … "crystal6"
  *   this.hoverSettings = a;                       // a = crystalHovers[i]
  *   Object.keys(a).forEach(h => {
  *     const d = X.settings.crystal[h];            // 弹簧的**静止值**
@@ -33,8 +34,25 @@
  *     少一个键 = 那个参数永远停在静止值。上游第 3 颗（索引 2）就少了
  *     `resetDistances`，这里逐条保留原样，不擅自补。
  *
- * 所以「重做 7 颗水晶」真正的大头是 `crystal`（静止态）：它才是 95% 时间里
- * 看到的样子。`crystalHovers` 决定的是划过去那一下的戏剧性。两边都调。
+ * 为什么还要再加一个 crystalRests
+ * ================================
+ * 上面两个键有个结构性的限制：静止态**只有一份**，7 颗共用。所以哪怕把
+ * `crystal.baseColor` 从白改成淡蓝，7 颗也还是一模一样的淡蓝 —— 站在页面上
+ * 看，跟上游的「7 块白玻璃」没有本质区别，这也正是上一版改完之后仍然被说
+ * 「你好像没改吧」的原因：改的是所有人共用的那一份。
+ *
+ * 真正要的是**逐颗的静止色**。引擎里没有这个键，于是加一个：
+ *
+ *   crystalRests: { crystal0: {…}, …, crystal6: {…} }
+ *
+ * 再把上面两处 `X.settings.crystal[k]` 的读取改写成
+ *
+ *   (X.settings.crystalRests && X.settings.crystalRests[this.id]
+ *     || X.settings.crystal)[k]
+ *
+ * `this.id` 在构造函数里比 hoverSettings 更早赋值，两处 `this` 都是词法绑定
+ * 到实例的箭头函数，所以直接可用。`||` 兜底意味着：这个键不存在时行为
+ * 逐字节回到上游，`palette:'legacy'` 连补丁都不下。
  *
  * 哪些参数不动
  * ============
@@ -54,6 +72,22 @@
  * 也就是「多大比例的表面读作 peaksColor」。把它调高＝用 peaksColor 盖掉
  * baseColor，恰好和「让 7 颗颜色更分得开」这个目标相反。所以照抄上游。
  *
+ * 为什么 baseColor 真的看得见
+ * ===========================
+ * 片元着色器最后一步是
+ *
+ *   float decay = exp(-vThickness * decayFactor);
+ *   color *= mix(vGlassColor, vec3(1.), decay);
+ *
+ * 用 draco 解出 crystal0 的顶点属性实测：`_thickness` 中位数 .1705，
+ * 静止态 decayFactor 是 20，于是 decay = exp(-.171 × 20) ≈ .033 ——
+ * 玻璃色占了 97%，`baseColor` 基本是直接乘上去的。另外 `_peaks` 的中位数
+ * 只有 .0064（p90 也才 .1923），所以 `vGlassColor ≈ baseColor`，
+ * peaksColor 只在棱线上露一点。
+ *
+ * 反过来说：明度压到 L≈.55 以下就会发闷（乘法只会变暗）。所以静止态那 7 个
+ * 颜色明度全在 .70–.74，靠色相和饱和度拉开差别，不靠明暗。
+ *
  * 能改的、也确实改了的是纯光学的那一半：颜色、折射率、色散、虹彩、
  * 环境反射/折射比例、边缘光曲线、色彩曲线、亮度上限。
  * （对应的片元着色器：
@@ -69,7 +103,7 @@
  * 这个玻璃着色器是多通道折射 + 虹彩，沙箱里只有 SwiftShader 软件渲染，
  * **渲不出真实效果**。这里能保证的是数值合法、构建通过、不报错、可一键
  * 回退（palette:'legacy'）；「好不好看」必须在真机上看。
- * 所以给了 4 套预设 + `base` / `items` 两层覆盖 + `npm run dev` 增量构建。
+ * 所以给了 5 套预设 + `base` / `items` 两层覆盖 + `npm run dev` 增量构建。
  */
 
 const { isHex6, hexToHsl, hslToHex, hexToInt } = require('./color');
@@ -98,6 +132,9 @@ const ALL_KEYS = Object.keys(UPSTREAM_BASE);
 const KEY_SET = new Set(ALL_KEYS);
 const COUNT = UPSTREAM_HOVERS.length;   // 7 —— 引擎用它决定案例热区数量
 
+// 引擎里 `new Jh({id:"crystal"+e, …})`，所以 id 就是这 7 个字符串。
+const IDS = Array.from({ length: COUNT }, (_, i) => `crystal${i}`);
+
 // ------------------------------------------------------------- 序列化
 // 输出必须长得像压缩产物：`.33` 而不是 `0.33`，颜色写成 `new Re(十进制)`。
 
@@ -122,15 +159,32 @@ function serializeObj(o) {
 
 const serializeHovers = (list) => `[${list.map(serializeObj).join(',')}]`;
 
+/** 7 条静止态 → `{crystal0:{…},…,crystal6:{…}}`，键名对齐引擎里的 this.id。 */
+const serializeRests = (list) =>
+  `{${list.map((o, i) => `${IDS[i]}:${serializeObj(o)}`).join(',')}}`;
+
 // 锚点用的上游字面量。由同一个序列化器生成 —— 万一它和上游对不上，
 // applyAnchors 会因为 expect:1 落空而报错，不会静默改错地方。
 const FIND_BASE = `crystal:${serializeObj(UPSTREAM_BASE)}`;
 const FIND_HOVERS = `crystalHovers:${serializeHovers(UPSTREAM_HOVERS)}`;
 
+// 两处「读静止值」的原文。改写成先查 crystalRests[this.id]，查不到再回落
+// 到共用的 crystal —— 所以没有这个键的时候行为和上游一字不差。
+const REST_LOOKUP = '(X.settings.crystalRests&&X.settings.crystalRests[this.id]||X.settings.crystal)';
+const FIND_READ_INIT = 'const d=X.settings.crystal[h];d instanceof Re';
+const NEXT_READ_INIT = `const d=${REST_LOOKUP}[h];d instanceof Re`;
+const FIND_READ_RESET = 'const i=X.settings.crystal[t];i instanceof Re';
+const NEXT_READ_RESET = `const i=${REST_LOOKUP}[t];i instanceof Re`;
+
 // ------------------------------------------------------------- 配色工具
 
 /** 色相环上取色，返回 #RRGGBB。h 允许超出 [0,360)，自动取模。 */
 const tint = (h, s, l) => hslToHex(((h % 360) + 360) % 360, s, l);
+
+/** derive() 的默认口径：悬停态用。 */
+const HOVER_TINT = { ps: 0.72, pl: 0.93, fs: 0.60, fl: 0.88 };
+/** 静止态用：饱和度更低、明度更高，因为静止态不该抢戏。 */
+const REST_TINT = { ps: 0.50, pl: 0.95, fs: 0.44, fl: 0.90 };
 
 /**
  * 由主色派生棱峰高光与边缘光。
@@ -140,12 +194,15 @@ const tint = (h, s, l) => hslToHex(((h % 360) + 360) % 360, s, l);
  * 同一颗上出现三个相邻色相，转动时边缘会读出「彩边」，也就是虹彩感。
  * 上游其实也是这个路子 —— 第 4 颗主色 #FFB0FA（304°）配了 248° 的棱峰
  * 和 220° 的边缘光，只是每颗的偏移量都不一样。
+ *
+ * @param {string} base #RRGGBB 主色
+ * @param {{ps:number,pl:number,fs:number,fl:number}} t 棱峰/边缘的饱和度与明度
  */
-function derive(base) {
-  const [h, , ] = hexToHsl(base);
+function derive(base, t = HOVER_TINT) {
+  const [h] = hexToHsl(base);
   return {
-    peaksColor: tint(h + 34, 0.72, 0.93),
-    fringeColor: tint(h - 26, 0.60, 0.88),
+    peaksColor: tint(h + 34, t.ps, t.pl),
+    fringeColor: tint(h - 26, t.fs, t.fl),
   };
 }
 
@@ -155,26 +212,82 @@ const toward = (v, t, k) => v + (t - v) * k;
 
 /**
  * 预设结构
- *   hues   7 个色相
- *   sat    饱和度（数字 = 7 颗统一，数组 = 逐颗）
- *   light  明度（同上）
- *   rest   静止态 `crystal` 的覆盖项
- *   hover  悬停态的逐参数变换 (upstreamValue, index) => newValue
+ *   hues      7 个色相
+ *   sat       悬停态饱和度（数字 = 7 颗统一，数组 = 逐颗）
+ *   light     悬停态明度（同上）
+ *   restSat   **可选**。给了就逐颗生成静止色，写进 crystalRests
+ *   restLight **可选**，同上。两个要么都给要么都不给
+ *   rest      静止态 `crystal` 的覆盖项（7 颗共用的那一份 / 回落值）
+ *   hover     悬停态的逐参数变换 (upstreamValue, index) => newValue
  */
 const PALETTES = {
-  // 极光虹彩 —— 默认。7 个色相沿冷色为主的弧线均匀铺开，另留金 / 品红
-  // 两个暖色点做节奏。上游的问题不是「有 7 色」，是 7 色里有 4 颗挤在
-  // 绿-青区间（128° / 154° / 167° / 187°），其中两颗饱和度只有 21% 和
-  // 56% —— 在多通道折射里必然糊成灰。这里把那两颗挪到紫（265°）和
-  // 黄绿（96°），饱和度统一抬到 82%。
+  // 棱镜 —— 默认。唯一一个**静止态就逐颗给色**的预设。
+  //
+  // 色相沿暖到冷走一圈：金 38° → 珊瑚 12° → 玫瑰 330° → 紫 286° →
+  // 靛 224° → 青 188° → 薄荷 152°。相邻间隔 26°–38°，在多通道折射糊过
+  // 一层之后仍然分得开；顺序是单调的，7 颗横排过去像一道分光。
+  //
+  // 明度全部锁在 .70–.74（静止）/ .77–.80（悬停）—— 见文件头「为什么
+  // baseColor 真的看得见」：玻璃色是乘上去的，压暗只会脏。
+  // 饱和度静止 .50–.60、悬停 .80–.88，所以划过去那一下是「同一个色相
+  // 突然浓起来」，不是换个颜色，读起来才像同一块玻璃被点亮。
+  prism: {
+    label: '棱镜',
+    hues: [38, 12, 330, 286, 224, 188, 152],
+    sat: [0.88, 0.86, 0.84, 0.80, 0.84, 0.86, 0.82],
+    light: [0.78, 0.79, 0.80, 0.80, 0.78, 0.77, 0.78],
+    restSat: [0.60, 0.58, 0.54, 0.50, 0.56, 0.58, 0.52],
+    restLight: [0.70, 0.72, 0.74, 0.74, 0.72, 0.70, 0.72],
+    rest: {
+      // 这一份是**回落值**：crystalRests 里查不到时才用（正常跑不到）。
+      // 取象牙白，和加载页的纸色同一家族，不至于突兀。
+      baseColor: '#F3F1EC',
+      peaksColor: '#FFFFFF',
+      fringeColor: '#E7E2D8',
+      // 静止态也得是玻璃：上游 envRefraction 是 0，等于纯镜面铬块。
+      envReflection: 0.94,
+      envRefraction: 0.30,
+      reflectionIridescence: 0.18,
+      refractionIridescence: 0.14,
+      iorStart: 1.30,
+      iorDelta: 0.45,
+      fringeCurve: 4.2,
+      fringeMix: 0.92,
+      colorBoost: 1.45,
+      colorCurve: 1.28,
+      maxColorValue: 34,
+    },
+    hover: {
+      envReflection: (v) => r2(toward(v, 1, 0.34)),
+      envRefraction: (v) => r2(toward(v, 1, 0.22)),
+      reflectionIridescence: (v) => r2(toward(v, 1, 0.4)),
+      refractionIridescence: (v) => r2(toward(v, 1, 0.28)),
+      fringeCurve: (v) => r2(toward(v, 5, 0.24)),
+      fringeMix: (v) => r2(v * 0.94),
+      colorCurve: (v) => r2(toward(v, 1, 0.6)),
+      colorCurveR: (v) => r2(toward(v, 1, 0.6)),
+      colorCurveG: (v) => r2(toward(v, 1, 0.6)),
+      colorCurveB: (v) => r2(toward(v, 1, 0.6)),
+      colorBoost: (v) => r2(Math.min(1.7, v * 1.5 + 0.16)),
+      maxColorValue: (v) => Math.min(150, Math.round(v * 1.3)),
+      // 折射率排成一条梯子（1.24 → 1.60，覆盖水玻璃到铅玻璃），
+      // 7 颗读起来是 7 种材质而不是同一块玻璃染了 7 个色。
+      // 上游第 5 颗写的是 1.98，比钻石（2.42）还离谱，这里拉回现实区间。
+      iorStart: (v, i) => r2(1.24 + i * 0.06),
+      // 色散：上游是两极分化的（.33 / .33 / 3 / 5 / 4 / 5 / .5），
+      // 只把偏低的几颗抬上来，本来就高的保持不变。
+      iorDelta: (v, i) => r2(Math.max(v, 1.2 + i * 0.35)),
+    },
+  },
+
+  // 极光虹彩 —— 静止态 7 颗共用一个冷调白。想要「安静一点、悬停才炸」
+  // 就用它。色相弧和 jewel 共用。
   aurora: {
     label: '极光虹彩',
     hues: [45, 222, 138, 312, 265, 186, 96],
     sat: 0.82,
     light: [0.72, 0.76, 0.76, 0.80, 0.78, 0.70, 0.74],
     rest: {
-      // 静止态：不再是纯白镜面。给一点冷调品牌色 + 打开一点折射，
-      // 不划过的时候也像玻璃而不像铬块。悬停时仍有明显的色彩落差。
       baseColor: '#EEF4FF',
       peaksColor: '#FFFFFF',
       fringeColor: '#DCE7FF',
@@ -200,18 +313,14 @@ const PALETTES = {
       colorCurveB: (v) => r2(toward(v, 1, 0.6)),
       colorBoost: (v) => r2(Math.min(1.6, v * 1.5 + 0.12)),
       maxColorValue: (v) => Math.min(150, Math.round(v * 1.3)),
-      // 折射率排成一条梯子（1.24 → 1.60，覆盖水玻璃到铅玻璃），
-      // 7 颗读起来是 7 种材质而不是同一块玻璃染了 7 个色。
-      // 上游第 5 颗写的是 1.98，比钻石（2.42）还离谱，这里拉回现实区间。
       iorStart: (v, i) => r2(1.24 + i * 0.06),
-      // 色散：上游是两极分化的（.33 / .33 / 3 / 5 / 4 / 5 / .5），
-      // 只把偏低的几颗抬上来，本来就高的保持不变。
       iorDelta: (v, i) => r2(Math.max(v, 1.2 + i * 0.35)),
     },
   },
 
   // 统一冰蓝 —— 最贴品牌。7 颗都在 184°–218° 的窄带里，靠明度区分，
   // 虹彩压低、反射拉高，读起来是同一块冰的 7 个切面。
+  // 这个预设**故意**不给 restSat/restLight：整体感是它的卖点。
   ice: {
     label: '冰蓝',
     hues: [206, 214, 190, 218, 198, 184, 210],
@@ -255,6 +364,8 @@ const PALETTES = {
     hues: [45, 222, 138, 312, 265, 186, 96],
     sat: 0.88,
     light: [0.5, 0.52, 0.46, 0.54, 0.5, 0.48, 0.46],
+    restSat: [0.42, 0.44, 0.40, 0.46, 0.42, 0.44, 0.40],
+    restLight: [0.62, 0.64, 0.60, 0.66, 0.62, 0.64, 0.60],
     rest: {
       baseColor: '#F2EFFF',
       peaksColor: '#FFFFFF',
@@ -266,7 +377,9 @@ const PALETTES = {
       iorStart: 1.45,
       iorDelta: 0.6,
       colorCurve: 1.2,
-      maxColorValue: 40,
+      // 深色本体在多通道折射里容易发闷，静止态就得把 boost 抬起来。
+      colorBoost: 1.8,
+      maxColorValue: 44,
     },
     hover: {
       envReflection: (v) => r2(toward(v, 1, 0.2)),
@@ -279,7 +392,6 @@ const PALETTES = {
       colorCurveR: (v) => r2(toward(v, 1, 0.45)),
       colorCurveG: (v) => r2(toward(v, 1, 0.45)),
       colorCurveB: (v) => r2(toward(v, 1, 0.45)),
-      // 深色本体在多通道折射里容易发闷，boost 和上限都要跟着抬。
       colorBoost: (v) => r2(Math.min(2.4, v * 2 + 0.3)),
       maxColorValue: (v) => Math.min(200, Math.round(v * 1.6)),
       iorStart: (v, i) => r2(1.45 + i * 0.05),
@@ -290,18 +402,29 @@ const PALETTES = {
 
 const PALETTE_NAMES = [...Object.keys(PALETTES), 'legacy', 'custom'];
 
-const CRYSTAL_DEFAULTS = { palette: 'aurora', base: {}, items: [] };
+const CRYSTAL_DEFAULTS = { palette: 'prism', base: {}, items: [] };
 
-/** 展开某个预设 → `{ base, hovers }`（均为 hex + 数字，尚未序列化）。 */
+/**
+ * 展开某个预设 → `{ base, rests, hovers }`（均为 hex + 数字，尚未序列化）。
+ * `rests` 为 null 表示这个预设不逐颗给静止色，7 颗共用 `base`。
+ */
 function expand(name) {
   const p = PALETTES[name];
   const base = Object.assign({}, UPSTREAM_BASE, p.rest);
   const at = (v, i) => (Array.isArray(v) ? v[i] : v);
 
+  const perRest = p.restSat !== undefined && p.restLight !== undefined;
+  const rests = !perRest ? null : p.hues.map((h, i) => {
+    const baseColor = tint(h, at(p.restSat, i), at(p.restLight, i));
+    // 静止态给满 25 个键：引擎按 hoverSettings 的键集合建弹簧，读的是
+    // 静止对象里的同名值，缺一个就会读到 undefined。
+    return Object.assign({}, base, { baseColor }, derive(baseColor, REST_TINT));
+  });
+
   const hovers = UPSTREAM_HOVERS.map((up, i) => {
     const out = {};
     const baseColor = tint(at(p.hues, i), at(p.sat, i), at(p.light, i));
-    const d = derive(baseColor);
+    const d = derive(baseColor, HOVER_TINT);
     // 逐条保留上游的键集合与键顺序 —— 键集合决定这颗给哪些参数建弹簧。
     for (const k of Object.keys(up)) {
       if (k === 'baseColor') out[k] = baseColor;
@@ -312,7 +435,7 @@ function expand(name) {
     }
     return out;
   });
-  return { base, hovers };
+  return { base, rests, hovers };
 }
 
 // ------------------------------------------------------------------ 校验
@@ -353,6 +476,31 @@ function applyPatch(patch, target, where, errors) {
   }
 }
 
+/**
+ * items[i] 支持两种写法：
+ *   { iorStart: 1.4 }                    —— 老写法，整条当悬停态补丁
+ *   { rest: {…}, hover: {…} }            —— 分开写静止态和悬停态
+ * 两个键名都不是合法参数名，所以不会有歧义。
+ */
+function splitItem(patch, where, errors) {
+  if (patch === undefined || patch === null) return { rest: null, hover: null };
+  if (typeof patch !== 'object' || Array.isArray(patch)) {
+    errors.push(`${where}: 需要一个对象，实际拿到 ${JSON.stringify(patch)}`);
+    return { rest: null, hover: null };
+  }
+  const keys = Object.keys(patch);
+  if (!keys.includes('rest') && !keys.includes('hover')) {
+    return { rest: null, hover: patch };
+  }
+  for (const k of keys) {
+    if (k !== 'rest' && k !== 'hover') {
+      errors.push(`${where}.${k}: 一旦用了 rest / hover 分组写法，`
+        + '其余参数就得放进这两个组里，不能和它们平级');
+    }
+  }
+  return { rest: patch.rest || null, hover: patch.hover || null };
+}
+
 /** 预设的中文名，只给构建摘要看。legacy / custom 不在 PALETTES 里，单独兜底。 */
 function labelOf(name) {
   if (PALETTES[name]) return PALETTES[name].label;
@@ -364,12 +512,16 @@ function labelOf(name) {
 /**
  * @param {object} scene  原始 config/scene.js
  * @returns {{anchors:object[], errors:string[], warnings:string[],
- *            palette:string, label:string, colors:string[]}}
+ *            palette:string, label:string, colors:string[],
+ *            restColors:string[]}}
  */
 function buildCrystals(scene) {
   const errors = [];
   const warnings = [];
   const raw = (scene && scene.crystals) || {};
+  const bail = (p) => ({
+    anchors: [], errors, warnings, palette: p, label: labelOf(p), colors: [], restColors: [],
+  });
 
   for (const k of Object.keys(raw)) {
     if (!['palette', 'base', 'items'].includes(k)) {
@@ -381,52 +533,78 @@ function buildCrystals(scene) {
   if (!PALETTE_NAMES.includes(palette)) {
     errors.push(`scene.crystals.palette: 未知取值 ${JSON.stringify(palette)}`
       + `（可选: ${PALETTE_NAMES.join(', ')}）`);
-    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors: [] };
+    return bail(palette);
   }
 
   const items = raw.items === undefined ? [] : raw.items;
   if (!Array.isArray(items)) {
     errors.push(`scene.crystals.items: 需要一个数组，实际拿到 ${JSON.stringify(items)}`);
-    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors: [] };
+    return bail(palette);
   }
   // 引擎用 crystalHovers.length 决定案例热区数量（`for (let e=0; e<
   // X.settings.crystalHovers.length; e++)`），多一条少一条都会和 7 个案例错位。
   if (items.length !== 0 && items.length !== COUNT) {
     errors.push(`scene.crystals.items: 要么留空，要么恰好 ${COUNT} 条`
       + `（引擎用它的长度决定案例热区数量），实际 ${items.length} 条`);
-    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors: [] };
+    return bail(palette);
   }
   if (palette === 'custom' && items.length !== COUNT) {
     errors.push(`scene.crystals.palette 设成 'custom' 时，items 必须给满 ${COUNT} 条`);
-    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors: [] };
+    return bail(palette);
   }
 
   // legacy / custom 都从上游原值起步；custom 靠 items 逐条改，
   // legacy 不叠加任何东西 —— 于是它连补丁都不下，产物逐字节等于上游。
   const start = (palette === 'legacy' || palette === 'custom')
-    ? { base: Object.assign({}, UPSTREAM_BASE), hovers: UPSTREAM_HOVERS.map((o) => Object.assign({}, o)) }
+    ? {
+      base: Object.assign({}, UPSTREAM_BASE),
+      rests: null,
+      hovers: UPSTREAM_HOVERS.map((o) => Object.assign({}, o)),
+    }
     : expand(palette);
 
+  // 先把共用静止态定下来（预设 + 用户的 base 覆盖），逐颗静止态从它派生 ——
+  // 这样 scene.crystals.base 里写的光学参数会同时作用到 7 颗身上，
+  // 只有颜色是逐颗的。
   applyPatch(raw.base, start.base, 'scene.crystals.base', errors);
+  if (start.rests) {
+    start.rests = start.rests.map((r) => Object.assign({}, start.base, {
+      baseColor: r.baseColor, peaksColor: r.peaksColor, fringeColor: r.fringeColor,
+    }));
+  }
 
-  items.forEach((patch, i) => {
-    if (patch === undefined || patch === null) return;
-    if (typeof patch === 'object' && !Array.isArray(patch)) {
-      for (const k of Object.keys(patch)) {
+  const split = items.map((patch, i) => splitItem(patch, `scene.crystals.items[${i}]`, errors));
+
+  // 用户给了逐颗静止色，但预设本身不逐颗 —— 现场把 7 份补出来。
+  if (!start.rests && split.some((s) => s.rest)) {
+    start.rests = IDS.map(() => Object.assign({}, start.base));
+  }
+
+  split.forEach((s, i) => {
+    if (s.rest && start.rests) {
+      applyPatch(s.rest, start.rests[i], `scene.crystals.items[${i}].rest`, errors);
+    }
+    if (!s.hover) return;
+    if (typeof s.hover === 'object' && !Array.isArray(s.hover)) {
+      for (const k of Object.keys(s.hover)) {
         if (KEY_SET.has(k) && !(k in start.hovers[i])) {
           warnings.push(`scene.crystals.items[${i}].${k}: 上游第 ${i + 1} 颗本来没有这个键，`
-            + '加上它会多给这个参数建一根弹簧（静止值取 crystal 里的同名值）。'
+            + '加上它会多给这个参数建一根弹簧（静止值取静止态里的同名值）。'
             + '确认这是你要的效果再留着。');
         }
       }
     }
-    applyPatch(patch, start.hovers[i], `scene.crystals.items[${i}]`, errors);
+    applyPatch(s.hover, start.hovers[i], `scene.crystals.items[${i}]`, errors);
   });
 
   const colors = start.hovers.map((h) => h.baseColor);
-  if (errors.length) return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors };
+  const restColors = start.rests ? start.rests.map((r) => r.baseColor) : [];
+  if (errors.length) {
+    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors, restColors };
+  }
 
-  const nextBase = `crystal:${serializeObj(start.base)}`;
+  const nextBase = `crystal:${serializeObj(start.base)}`
+    + (start.rests ? `,crystalRests:${serializeRests(start.rests)}` : '');
   const nextHovers = `crystalHovers:${serializeHovers(start.hovers)}`;
 
   // 和上游一模一样就不下补丁 —— 否则构建摘要会虚报改动数。
@@ -441,8 +619,20 @@ function buildCrystals(scene) {
       key: 'crystals.hovers', file: 'engine', find: FIND_HOVERS, replace: nextHovers, expect: 1,
     });
   }
+  // 只有真的写了 crystalRests 才去改引擎的读取路径。两处一起改，
+  // 少改一处会导致「悬停回来之后颜色跳成共用色」。
+  if (start.rests) {
+    anchors.push({
+      key: 'crystals.restLookup.init', file: 'engine',
+      find: FIND_READ_INIT, replace: NEXT_READ_INIT, expect: 1,
+    });
+    anchors.push({
+      key: 'crystals.restLookup.reset', file: 'engine',
+      find: FIND_READ_RESET, replace: NEXT_READ_RESET, expect: 1,
+    });
+  }
 
-  return { anchors, errors, warnings, palette, label: labelOf(palette), colors };
+  return { anchors, errors, warnings, palette, label: labelOf(palette), colors, restColors };
 }
 
 module.exports = {
@@ -450,6 +640,7 @@ module.exports = {
   expand,
   serializeObj,
   serializeHovers,
+  serializeRests,
   derive,
   num,
   CRYSTAL_DEFAULTS,
@@ -459,6 +650,14 @@ module.exports = {
   UPSTREAM_HOVERS,
   FIND_BASE,
   FIND_HOVERS,
+  FIND_READ_INIT,
+  NEXT_READ_INIT,
+  FIND_READ_RESET,
+  NEXT_READ_RESET,
+  REST_LOOKUP,
+  HOVER_TINT,
+  REST_TINT,
   ALL_KEYS,
+  IDS,
   COUNT,
 };

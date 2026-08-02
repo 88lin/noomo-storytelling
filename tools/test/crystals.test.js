@@ -147,16 +147,40 @@ test('crystals: palette=legacy 时不下任何补丁（产物逐字节等于上�
   eq(r.palette, 'legacy');
 });
 
-test('crystals: 不写 crystals 段时走默认预设 aurora，并下 2 条补丁', () => {
+test('crystals: 不写 crystals 段时走默认预设 prism，并下 4 条补丁', () => {
   const r = buildCrystals({});
   eq(r.errors, []);
-  eq(r.palette, 'aurora');
-  eq(r.anchors.map((a) => a.key), ['crystals.base', 'crystals.hovers']);
+  eq(r.palette, 'prism');
+  // prism 逐颗给静止色，所以除了 base / hovers 还要改引擎读静止值的两处。
+  eq(r.anchors.map((a) => a.key), [
+    'crystals.base', 'crystals.hovers',
+    'crystals.restLookup.init', 'crystals.restLookup.reset',
+  ]);
   for (const a of r.anchors) {
     eq(a.file, 'engine');
     eq(a.expect, 1);
     eq(countOf(engine, a.find), 1, `${a.key} 的 find 对不上`);
   }
+});
+
+test('crystals: prism 的 7 颗静止色互不相同，且明度都在能看见的区间', () => {
+  const { relLuminance } = require('../color');
+  const r = buildCrystals({});
+  eq(r.restColors.length, 7);
+  eq(new Set(r.restColors).size, 7, '静止色有重复 —— 那就等于没改');
+  // 玻璃色是乘上去的，压暗只会脏；这里守住下限，出问题能立刻定位。
+  for (const c of r.restColors) {
+    ok(relLuminance(c) > 0.3, `${c} 太暗，多通道折射之后会发闷`);
+  }
+  // 静止态和悬停态必须能看出差别，否则划过去没反馈。
+  r.restColors.forEach((c, i) => ok(c !== r.colors[i], `第 ${i} 颗静止/悬停同色`));
+});
+
+test('crystals: legacy 不下 restLookup 补丁，产物逐字节等于上游', () => {
+  const r = buildCrystals({ crystals: { palette: 'legacy' } });
+  eq(r.errors, []);
+  eq(r.anchors, []);
+  eq(r.restColors, []);
 });
 
 test('crystals: 生成的 hovers 字面量里恰好 7 组、21 个颜色', () => {

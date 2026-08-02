@@ -38,6 +38,13 @@ const {
 
 class BuildError extends Error {}
 
+/** 构建摘要里加载页那一行的人话说明。 */
+const PRE_LABEL = {
+  editorial: '象牙纸排印',
+  progress: '深蓝渐变进度条',
+  legacy: '保持上游原样',
+};
+
 /** require 一份配置，顺便清缓存，好让 dev 监听模式能读到新内容。 */
 function loadConfig(name) {
   const file = path.join(CONFIG_DIR, `${name}.js`);
@@ -235,8 +242,12 @@ function build({ log = console.log } = {}) {
   patched.page = patchCaseLinks(injectStory(patched.page, { dataModule: './story.data.js' }));
 
   // 3b. 外壳文案 + 滚动节奏
+  // 分组留着，末尾的摘要要按来源报数（applyAnchors 有一条不上就抛错，
+  // 所以这几个长度加起来必然等于 res.applied.length）。
+  const shellAnchors = buildAnchors(site);
+  const sceneAnchors = buildSceneAnchors(scene);
   const anchors = [
-    ...buildAnchors(site), ...buildSceneAnchors(scene), ...pre.anchors, ...crystals.anchors,
+    ...shellAnchors, ...sceneAnchors, ...pre.anchors, ...crystals.anchors,
   ];
   const res = applyAnchors(patched, anchors);
   patched = res.out;
@@ -288,8 +299,8 @@ function build({ log = console.log } = {}) {
   if (log) {
     const s = compiled.stats;
     log(`构建完成  ${ms}ms  →  ${path.relative(ROOT, DIST_DIR)}/`);
-    const shell = res.applied.length - 1 - pre.anchors.length - crystals.anchors.length;
-    log(`  文案补丁   ${res.applied.length} 处（外壳 ${shell} + 滚动节奏 1`
+    log(`  文案补丁   ${res.applied.length} 处（外壳 ${shellAnchors.length}`
+      + ` + 滚动节奏 ${sceneAnchors.length}`
       + `${pre.anchors.length ? ` + 加载页 ${pre.anchors.length}` : ''}`
       + `${crystals.anchors.length ? ` + 水晶 ${crystals.anchors.length}` : ''}）`);
     log(`  故事块     smallLight ${s.smallLight} / smallDark ${s.smallDark} / `
@@ -299,7 +310,7 @@ function build({ log = console.log } = {}) {
       + `${scene.sections.reduce((a, x) => a + x.xs, 0)}`);
     log(`  强调样式   ${theme.mode}`);
     log(`  菜单背景   ${menu.mode}${menu.contrast ? `（白字对比度 ${menu.contrast}:1）` : ''}`);
-    log(`  加载页     ${pre.style}${pre.style === 'legacy' ? '（保持上游原样）' : '（真实进度）'}`);
+    log(`  加载页     ${pre.style}（${PRE_LABEL[pre.style] || '真实进度'}）`);
     log(`  水晶       ${crystals.palette}（${crystals.label}）`
       + `${crystals.anchors.length ? '' : ' — 与上游一致，未下补丁'}`);
     log(`  文件       ${copied} 个（其中 ${swapped.length} 个由 config 替换）`);

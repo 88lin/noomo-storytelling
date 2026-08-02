@@ -15,12 +15,26 @@
  * old config.js look like it worked while doing nothing.
  */
 
+const { FONTS } = require('./paths');
+
 const esc = (s) => String(s)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;');
 
 /** JSON-quote for embedding into the JS bundles. */
 const q = (s) => JSON.stringify(String(s));
+
+/**
+ * 外链的安全属性。上游的头部按钮（nav.*）带了这一串，页脚和移动端菜单的社交
+ * 三连没带 —— 同一份产物里两套写法，明显是漏了。`target="_blank"` 不配
+ * `noopener` 会把 `window.opener` 交给对方页面（反向标签劫持），`noreferrer`
+ * 顺带掐掉 Referer 泄漏。现代浏览器对 `_blank` 默认隐含 noopener，但这里是
+ * 生成静态站的模板，不能假设访客用的是新浏览器。
+ *
+ * 两种上下文各一份：HTML 属性串，以及 Vue 编译产物里的 props 对象字面量。
+ */
+const REL_EXT_HTML = ' rel="noopener noreferrer"';
+const REL_EXT_JS = ',rel:"noopener noreferrer"';
 
 /** Split a CTA string into the per-letter spans the prerendered HTML uses. */
 function ctaSpans(text) {
@@ -29,6 +43,13 @@ function ctaSpans(text) {
     return `<span class="letter" data-space="${space}" data-v-843b322d>${space ? '&nbsp;' : esc(ch)}</span>`;
   }).join('');
 }
+
+/** 第一个 modulepreload —— 字体预载要抢在它前面。 */
+const FIRST_MODULE = '<link rel="modulepreload" as="script" crossorigin href="./_nuxt/CbdjwYMp.js">';
+
+const FONT_LINKS = FONTS
+  .map((f) => `<link rel="preload" as="font" type="${f.type}" href="${f.href}" crossorigin>`)
+  .join('');
 
 function buildAnchors(cfg) {
   const { meta, brand, nav, social, contact, hero, cursor, footer, errorPage } = cfg;
@@ -67,6 +88,11 @@ function buildAnchors(cfg) {
   add('meta.favicon', 'html',
     '<link rel="icon" type="image/png" href="./fav.png">',
     `<link rel="icon" type="image/png" href="./${meta.favicon.out}">`);
+  // 字体预载。插在第一个 modulepreload **之前**：那是 1.6 MB 的引擎包，排在
+  // 它后面的预载等于没预载。两条 link 一起替换成一条锚点，替换次数才好核。
+  if (meta.fontPreload) {
+    add('meta.fontPreload', 'html', FIRST_MODULE, FONT_LINKS + FIRST_MODULE);
+  }
   // Nuxt 运行时把 app.baseURL 当作站点根：Vue Router 的 history base、app
   // manifest 的地址、publicAssetsURL() 生成的图标路径，全从这里读。上游把它
   // 烤死成 "/"，部署到 user.github.io/repo/ 就会连环出事：
@@ -146,22 +172,22 @@ function buildAnchors(cfg) {
   const S0 = social[0]; const S1 = social[1]; const S2 = social[2];
   add('social.0', 'html',
     '<a target="_blank" href="https://x.com/noomoagency" class="text-sans-18 text-white">x</a>',
-    `<a target="_blank" href="${esc(S0.url)}" class="text-sans-18 text-white">${esc(S0.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S0.url)}" class="text-sans-18 text-white">${esc(S0.label)}</a>`);
   add('social.1', 'html',
     '<a target="_blank" href="https://www.instagram.com/noomoagency/" class="text-sans-18 text-white">照片墙</a>',
-    `<a target="_blank" href="${esc(S1.url)}" class="text-sans-18 text-white">${esc(S1.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S1.url)}" class="text-sans-18 text-white">${esc(S1.label)}</a>`);
   add('social.2', 'html',
     '<a target="_blank" href="https://www.linkedin.com/company/noomoagency" class="text-sans-18 text-white">领英</a>',
-    `<a target="_blank" href="${esc(S2.url)}" class="text-sans-18 text-white">${esc(S2.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S2.url)}" class="text-sans-18 text-white">${esc(S2.label)}</a>`);
   add('social.0', 'page',
     'target:"_blank",href:"https://x.com/noomoagency",class:"text-sans-18 text-white"},"x",32)',
-    `target:"_blank",href:${q(S0.url)},class:"text-sans-18 text-white"},${q(S0.label)},32)`);
+    `target:"_blank"${REL_EXT_JS},href:${q(S0.url)},class:"text-sans-18 text-white"},${q(S0.label)},32)`);
   add('social.1', 'page',
     'target:"_blank",href:"https://www.instagram.com/noomoagency/",class:"text-sans-18 text-white"},"Instagram",32)',
-    `target:"_blank",href:${q(S1.url)},class:"text-sans-18 text-white"},${q(S1.label)},32)`);
+    `target:"_blank"${REL_EXT_JS},href:${q(S1.url)},class:"text-sans-18 text-white"},${q(S1.label)},32)`);
   add('social.2', 'page',
     'target:"_blank",href:"https://www.linkedin.com/company/noomoagency",class:"text-sans-18 text-white"},"LinkedIn",32)',
-    `target:"_blank",href:${q(S2.url)},class:"text-sans-18 text-white"},${q(S2.label)},32)`);
+    `target:"_blank"${REL_EXT_JS},href:${q(S2.url)},class:"text-sans-18 text-white"},${q(S2.label)},32)`);
 
   // Mobile-menu + error-page social row (engine chunk, two compiled copies).
   //
@@ -185,17 +211,17 @@ function buildAnchors(cfg) {
   for (const [key, url, label, cfgIdx, tail] of menuRow) {
     add(key, 'engine',
       `href:"${url}",${MENU_CLS}},"${label}",${tail}`,
-      `href:${q(social[cfgIdx].url)},${MENU_CLS}},${q(social[cfgIdx].label)},${tail}`);
+      `href:${q(social[cfgIdx].url)},${MENU_CLS}${REL_EXT_JS}},${q(social[cfgIdx].label)},${tail}`);
   }
   add('social.1.menu', 'html',
     '<a target="_blank" href="https://www.instagram.com/noomoagency/" class="text-sans-18 text-white opacity-61" data-v-89305177>照片墙</a>',
-    `<a target="_blank" href="${esc(S1.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S1.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S1.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S1.label)}</a>`);
   add('social.0.menu', 'html',
     '<a target="_blank" href="https://x.com/noomoagency" class="text-sans-18 text-white opacity-61" data-v-89305177>x</a>',
-    `<a target="_blank" href="${esc(S0.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S0.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S0.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S0.label)}</a>`);
   add('social.2.menu', 'html',
     '<a target="_blank" href="https://www.linkedin.com/company/noomoagency" class="text-sans-18 text-white opacity-61" data-v-89305177>领英</a>',
-    `<a target="_blank" href="${esc(S2.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S2.label)}</a>`);
+    `<a target="_blank"${REL_EXT_HTML} href="${esc(S2.url)}" class="text-sans-18 text-white opacity-61" data-v-89305177>${esc(S2.label)}</a>`);
 
   // -------------------------------------------------------------------- nav
   // Desktop header buttons (engine chunk) + prerendered html

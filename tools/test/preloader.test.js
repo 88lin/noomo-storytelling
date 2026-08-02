@@ -13,9 +13,10 @@ const fs = require('fs');
 const { test, eq, ok, setFile } = require('./harness');
 const { SRC } = require('../paths');
 const {
-  buildPreloader, nodes, toHtml, toVnode,
-  PRELOADER_DEFAULTS, PRELOADER_CLASSES, STYLES, SCOPE,
+  buildPreloader, nodes, toHtml, toVnode, solveFaint,
+  PRELOADER_DEFAULTS, PRELOADER_CLASSES, STYLES, SCOPE, PAPER_INK_MIN, PAD, CUT,
 } = require('../preloader');
+const { contrast, over } = require('../color');
 const { normalizeSite } = require('../assets');
 
 setFile('preloader');
@@ -157,8 +158,9 @@ test('preloader: 未知 style 报错并列出可选值', () => {
 });
 
 // ------------------------------------------------------------ 4. 配色注入
-test('preloader: 三个背景色 + 强调色 + 两个光斑色都进了 CSS', () => {
+test('preloader: progress 的三个背景色 + 强调色 + 两个光斑色都进了 CSS', () => {
   const r = buildPreloader(site({
+    style: 'progress',
     background: ['#101010', '#202020', '#303030'],
     accent: '#ABCDEF',
     glow: ['#112233', '#445566'],
@@ -178,8 +180,139 @@ test('preloader: 覆盖上游浅紫底用 .preloader.preloader，特异度打平
   ok(!base.css.includes(SCOPE), '主题层不该把 scope id 硬编码进去');
 });
 
+// ---------------------------------------------------- 4b. editorial 专属
+test('preloader: 默认走 editorial，纸色铺底、墨色排字，深蓝那套一个都不进 CSS', () => {
+  eq(base.style, 'editorial');
+  ok(base.css.includes('.preloader.preloader{background:#f2ede3}'), base.css.slice(0, 160));
+  // progress 的三个蓝和两团光斑不该出现在 editorial 的产物里 —— 两套样式
+  // 共用一份配置对象，最容易犯的错就是把不属于当前样式的色也写进去。
+  for (const c of ['#00276e', '#143a8a', '#062969', '#88aeff', '#4edbef', '#6248a4']) {
+    ok(!base.css.includes(c), `editorial 的 CSS 里不该出现 progress 的 ${c}`);
+  }
+  ok(!base.css.includes('ns-pre-pulse'), 'editorial 不要那个循环脉冲动画');
+});
+
+test('preloader: editorial 的数字用衬线斜体，百分号退回无衬线正体', () => {
+  ok(/\.ns-pre-num\{[^}]*font-family:var\(--font-serif\)/.test(base.css), 'ns-pre-num 没用衬线');
+  ok(/\.ns-pre-num\{[^}]*font-style:italic/.test(base.css), 'ns-pre-num 没用斜体');
+  ok(/\.ns-pre-pct\{[^}]*font-family:var\(--font-sans-regular\)/.test(base.css), 'ns-pre-pct 没退回无衬线');
+  ok(/\.ns-pre-pct\{[^}]*font-style:normal/.test(base.css), 'ns-pre-pct 没退回正体');
+});
+
+test('preloader: --ns-pre-p 恰好驱动两处（字形分界点 + 发丝线）', () => {
+  // 分界点算式收在 --ns-pre-cut 里，渐变的两个断点都读它，所以
+  // --ns-pre-p 只出现在「算分界点」和「发丝线 scaleX」两个地方。
+  eq(countOf(base.css, '--ns-pre-cut:'), 1, base.css);
+  eq(countOf(base.css, 'var(--ns-pre-cut)'), 2, base.css);
+  // 字形渐变必须包在 @supports 里：color:transparent 一旦在不支持
+  // background-clip:text 的浏览器上生效，整个数字会直接消失。
+  const i = base.css.indexOf('color:transparent');
+  ok(i !== -1, 'editorial 应当把数字设成 transparent 再用渐变裁进字形');
+  const block = base.css.slice(base.css.lastIndexOf('@supports', i), i);
+  ok(block.includes('background-clip:text'), `color:transparent 没被 @supports 包住：${block}`);
+});
+
+test('preloader: 斜体数字四周留了地方，background-clip 不会把笔画削平', () => {
+  // 回归测试。原来这条规则没有 padding，截图里数字右缘是一条笔直的竖切线：
+  // background-clip:text 的底图只铺到行盒，斜体挑到盒外的那截拿不到颜色。
+  // 真实页面上量出来的最坏值：右 .174em（末位 7）、左 .079em（"5"）、
+  // 上 .016em（所有数字）。低于这三个数，bug 就会悄悄回来。
+  const em = (v) => Number(v.replace('em', ''));
+  ok(em(PAD.right) > 0.174, `PAD.right=${PAD.right}，兜不住末位 7 的 .174em 挑出`);
+  ok(em(PAD.left) > 0.079, `PAD.left=${PAD.left}，兜不住 "5" 的 .079em 左挑`);
+  ok(em(PAD.top) > 0.016, `PAD.top=${PAD.top}，兜不住 .016em 顶挑`);
+  eq(em(PAD.x), em(PAD.left) + em(PAD.right), 'PAD.x 必须等于左右之和');
+  const rule = base.css.match(/\.ns-pre-val\{[^}]*\}/);
+  ok(rule, 'editorial 应当有 .ns-pre-val 规则');
+  ok(rule[0].includes(`padding:${PAD.top} ${PAD.right} 0 ${PAD.left}`), rule[0]);
+  // 补出去的必须用等量负 margin 收回来，否则字形右移、百分号被推远、
+  // 左侧栏那条对齐线也断了。
+  ok(rule[0].includes(`margin:-${PAD.top} -${PAD.right} 0 -${PAD.left}`), rule[0]);
+  // 补的这点必须待在 @supports 里 —— 不裁字形的浏览器没有这个问题。
+  const i = base.css.indexOf('padding:');
+  ok(base.css.slice(base.css.lastIndexOf('@supports', i), i).includes('background-clip'),
+    'padding 没被 @supports 包住');
+  // progress 不裁字形，不该有这些
+  ok(!buildPreloader(site({ style: 'progress' })).css.includes(PAD.right),
+    'progress 不用补挑出');
+});
+
+test('preloader: 分界点把 padding 从映射里减了回去，进度不会跑快', () => {
+  // 只补 padding 不改算式的话，渐变的 100% 会按「字宽 + PAD」算。
+  // 两位数字宽约 .9em，PAD 合计 .26em，到 85% 整个字就填满了。
+  ok(CUT.includes(`100% - ${PAD.x}`), `分界点没把 PAD 减掉：${CUT}`);
+  // 两头各留一段补偿：p=0 要能收到 0（左挑那截不能先黑），
+  // p=1 要能顶出盒外（右挑那截不能还是淡的）。
+  ok(CUT.includes('min(1,var(--ns-pre-p,0)*25)'), CUT);
+  ok(CUT.includes('clamp(0,(var(--ns-pre-p,0) - .96)*25,1)'), CUT);
+  // 三段合起来在 p=0/.5/1 三个点上必须分别落在 0 / 左pad+半字宽 / 满盒。
+  const em = (v) => Number(v.replace('em', ''));
+  const cut = (p, w) => Math.min(1, p * 25) * em(PAD.left)
+    + p * (w - em(PAD.x)) + Math.min(Math.max(0, (p - 0.96) * 25), 1) * em(PAD.right);
+  const box = 0.9 + em(PAD.x); // 两位数：字宽 .9em
+  eq(cut(0, box), 0, 'p=0 时分界点必须是 0');
+  eq(Number(cut(1, box).toFixed(6)), Number(box.toFixed(6)), 'p=1 时分界点必须到盒子右缘');
+  eq(Number(((cut(0.5, box) - em(PAD.left)) / 0.9).toFixed(6)), 0.5, 'p=.5 时必须正好吃掉半个字');
+  // 单调递增，中间不能有回头
+  let prev = -1;
+  for (let i = 0; i <= 100; i += 1) {
+    const v = cut(i / 100, box);
+    ok(v > prev, `分界点在 p=${i / 100} 处回头了`);
+    prev = v;
+  }
+});
+
+test('preloader: 用了 min()/clamp() 的分界点必须连 clamp 一起做特性检测', () => {
+  // 老 WebKit 认 -webkit-background-clip:text 却不认 clamp()：渐变会在计算期
+  // 整条作废回落成 none，配上 color:transparent 就是一片白。
+  const i = base.css.indexOf('--ns-pre-cut:');
+  const cond = base.css.slice(base.css.lastIndexOf('@supports', i), i);
+  ok(cond.includes('clamp('), `@supports 条件里没检测 clamp()：${cond}`);
+});
+
+test('preloader: 白色标识在象牙纸上会被压成纯黑，深底下不动它', () => {
+  ok(/\.ns-pre-mark\{[^}]*filter:brightness\(0\)/.test(base.css), 'editorial 没给标识上滤镜');
+  const dark = buildPreloader(site({ style: 'progress' }));
+  ok(!dark.css.includes('brightness(0)'), 'progress 是深底，压黑标识等于让它消失');
+  // 写死也要认
+  const forced = buildPreloader(site({ style: 'progress', markInvert: true }));
+  ok(forced.css.includes('filter:brightness(0)'), 'markInvert:true 应当强制生效');
+  eq(buildPreloader(site({ markInvert: 'sometimes' })).errors.length, 1);
+});
+
+test('preloader: 淡墨是解出来的，纸色变了它跟着变，且始终 ≥3:1', () => {
+  for (const paper of ['#f2ede3', '#ffffff', '#e6e0d2', '#d8d4cc']) {
+    const f = solveFaint('#14120f', paper);
+    ok(contrast(f, paper) >= 3, `${paper} 上解出的 ${f} 只有 ${contrast(f, paper).toFixed(2)}:1`);
+    // 「够看得清的前提下最淡的那一档」：往回退一个百分点必须掉到 3:1 以下，
+    // 否则说明解得偏保守、白白把字压深了。
+    for (let a = 0.2; a <= 0.96; a += 0.01) {
+      if (over('#14120f', paper, a) === f) {
+        if (a > 0.2001) {
+          const prev = over('#14120f', paper, a - 0.01);
+          ok(contrast(prev, paper) < 3, `${paper} 上还能更淡：${prev}`);
+        }
+        break;
+      }
+    }
+  }
+  // 纸越白，淡墨要越深才够对比
+  ok(solveFaint('#14120f', '#ffffff') !== solveFaint('#14120f', '#d8d4cc'),
+    '不同纸色应当解出不同的淡墨');
+});
+
+test('preloader: 纸墨对比度不够 7:1 直接报错，不降级', () => {
+  const r = buildPreloader(site({ paper: '#f2ede3', ink: '#8a8a8a' }));
+  eq(r.errors.length, 1, JSON.stringify(r.errors));
+  ok(r.errors[0].includes(`${PAPER_INK_MIN}:1`), r.errors[0]);
+  // 同一组纸墨在 progress 下不该拦着构建 —— 那套样式根本不用纸墨
+  eq(buildPreloader(site({ style: 'progress', ink: '#8a8a8a' })).errors, []);
+});
+
 test('preloader: 配色格式写错会报错，而且一次报全', () => {
-  const r = buildPreloader(site({ background: ['#101010'], accent: 'red', glow: [] }));
+  const r = buildPreloader(site({
+    style: 'progress', background: ['#101010'], accent: 'red', glow: [],
+  }));
   const msg = r.errors.join('\n');
   ok(/background/.test(msg), msg);
   ok(/accent/.test(msg), msg);

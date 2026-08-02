@@ -196,15 +196,66 @@ def static_checks() -> None:
     check(".remove()" not in html.split("__nsPreBoot")[-1][:4000],
           "兜底脚本只隐藏不摘节点（摘掉会让 Vue 往 null 父节点插）")
 
+    # ---- 字体预载：必须抢在 1.6 MB 的引擎包 modulepreload 之前
+    # 两款字体的 @font-face 埋在 entry CSS 里，不预载的话浏览器要等引擎包和
+    # CSS 都下完才去取，加载页那个巨大的衬线斜体数字整场都在用回落字体顶着。
+    fonts = re.findall(r'<link rel="preload" as="font"[^>]*href="([^"]+)"[^>]*>', html)
+    check(len(fonts) == 2, "两款自托管字体都预载了", str(fonts))
+    for href in fonts:
+        check('crossorigin' in html[html.index(href):html.index(href) + 80],
+              f"{href.rsplit('/', 1)[-1]} 带 crossorigin（字体走 CORS，漏了会白下一遍）")
+        check((DIST / href.lstrip("./")).exists(), f"{href} 真的在产物里")
+    i_font = html.find('as="font"')
+    i_mod = html.find('rel="modulepreload"')
+    check(i_font != -1 and i_font < i_mod,
+          "字体预载排在引擎包 modulepreload 前面（排后面等于没预载）",
+          f"font@{i_font}  modulepreload@{i_mod}")
+
     # ---- 注入的主题样式
     style = html[html.index('<style id="ns-theme">'):]
     style = style[:style.index("</style>")]
     for frag_txt, label in [
-        (".preloader.preloader{background:", "加载页背景被覆盖成品牌渐变"),
+        (".preloader.preloader{background:", "加载页背景被覆盖（上游那片淡紫没了）"),
         (".mobile-menu.mobile-menu", "移动端菜单背景规则已注入"),
         (".ns-pre-bar", "进度条样式已注入"),
     ]:
         check(frag_txt in style, label)
+
+    cfg = load_config("site.js")
+    pre_style = cfg.get("preloader", {}).get("style", "editorial")
+    menu_mode = cfg.get("menu", {}).get("background", "ink")
+    if pre_style == "editorial":
+        # 数字本身就是进度条：墨色填到 --ns-pre-p，剩下的是淡墨。
+        check("background-clip:text" in style,
+              "editorial：数字用 background-clip 做填充式进度")
+        check(style.count("--ns-pre-cut:") == 1
+              and style.count("var(--ns-pre-cut)") == 2,
+              "editorial：分界点收在 --ns-pre-cut，渐变两个断点都读它")
+        # 斜体字形会挑到行盒外面，不补 padding 就会被 background-clip 削平；
+        # 补完必须用等量负 margin 收回来，且分界点要把 padding 减掉。
+        check("padding:.02em .18em 0 .08em" in style
+              and "margin:-.02em -.18em 0 -.08em" in style,
+              "editorial：数字四周补了挑出量，并用负 margin 抵回原位")
+        check("100% - .26em" in style,
+              "editorial：分界点把左右 padding 从映射里减了回去")
+        check("var(--font-serif)" in style and "font-style:italic" in style,
+              "editorial：数字是衬线斜体")
+
+    if menu_mode == "ink":
+        # 这三条是 ink 版式的骨架，任何一条掉了都会退回「一堆居中链接」。
+        for frag_txt, label in [
+            ("counter-reset:ns-menu", "ink：导航列建了计数器"),
+            ("content:counter(ns-menu,decimal-leading-zero)",
+             "ink：序号是计数器生成的，没跟条目数绑死"),
+            ("--ns-menu-gut:max(20px,", "ink：量度变量在（发丝线通栏、文字收在量度内）"),
+            ("backdrop-filter:blur(", "ink：磨砂在"),
+            ("@supports not ((-webkit-backdrop-filter",
+             "ink：不支持磨砂时有实底兜底"),
+            ("a:focus-visible{outline:", "ink：补了键盘焦点框（上游整站一次没写过）"),
+        ]:
+            check(frag_txt in style, label)
+        check("transition-delay" not in style,
+              "ink：错峰复用上游的 delay-200/250/300/350，没另起一套")
 
     # ---- 水晶：只验参数，不验渲染
     check(engine.count("crystalHovers:[") == 1,
@@ -223,6 +274,33 @@ def static_checks() -> None:
           "相邻两颗色相至少差 25°（上游有 4 颗挤在青绿一带）",
           f"最小间隔 {min(gaps):.0f}°  色相 {[round(h) for h in hues]}")
     check(engine.count("crystal:{") == 1, "静止态参数表恰好一处")
+
+    # ---- 水晶静止态：上游 7 颗共用同一份 settings.crystal，所以只改那一份
+    # 等于 7 颗一起变白。模板往引擎注入 crystalRests，并把两处读取改成先查
+    # 逐颗表。没有这一步，「不悬停时也看得出七种颜色」根本做不到。
+    rests = engine.count("crystalRests:{")
+    if rests:
+        check(rests == 1, "crystalRests 恰好一处", str(rests))
+        lit_r = balanced(engine, engine.index("crystalRests:{") + len("crystalRests:"),
+                         "{", "}")
+        check(lit_r.count("baseColor:") == 7, "静止态逐颗 7 组",
+              str(lit_r.count("baseColor:")))
+        ints_r = [int(x) for x in re.findall(r"baseColor:new Re\((\d+)\)", lit_r)]
+        check(len(set(ints_r)) == 7, "静止态 7 颗互不相同（这才是用户肉眼能看见的那一层）",
+              str([f"#{v:06x}" for v in ints_r]))
+        rgb_r = [((v >> 16) & 255, (v >> 8) & 255, v & 255) for v in ints_r]
+        lums = [luminance(c) for c in rgb_r]
+        check(min(lums) >= 0.3,
+              "静止态每颗都够亮（玻璃壳厚度让明度低于 .55 的颜色发闷）",
+              f"最暗 {min(lums):.2f}")
+        hues_r = sorted(hue_of(c) for c in rgb_r)
+        gaps_r = [hue_gap(a, b) for a, b in zip(hues_r, hues_r[1:])]
+        check(gaps_r and min(gaps_r) >= 25, "静止态相邻色相也拉得开",
+              f"最小间隔 {min(gaps_r):.0f}°")
+        # 读取点也必须改掉，否则注入的表根本没人查
+        check(engine.count("X.settings.crystalRests&&X.settings.crystalRests[this.id]") == 2,
+              "引擎里两处静止态读取都改成先查逐颗表",
+              str(engine.count("X.settings.crystalRests&&X.settings.crystalRests[this.id]")))
 
 
 def balanced_div(src: str, start: int) -> str:
@@ -253,6 +331,9 @@ const tap = () => {
           .every(e => e.hasAttribute('data-v-724e2fc4')) : false,
       bg: getComputedStyle(document.querySelector('.preloader')).backgroundImage
           .slice(0, 40),
+      bgColor: getComputedStyle(document.querySelector('.preloader')).backgroundColor,
+      numFamily: getComputedStyle(v).fontFamily,
+      numStyle: getComputedStyle(v).fontStyle,
     };
   }
   if (v) {
@@ -295,19 +376,59 @@ MENU_PROBE = """() => {
   if (!m) return null;
   const cs = getComputedStyle(m);
   const af = getComputedStyle(m, '::after');
+  const nav = m.children[1] || null;
+  const links = nav ? [...nav.children].filter(e => e.tagName === 'A') : [];
+  const a0 = links[0] || null;
+  // backdrop-filter 在无 GPU 的软件渲染里会被整个算成 none（连上游自己带
+  // Tailwind backdrop-blur 的汉堡按钮也一样），所以改从 CSSOM 读声明本身。
+  let backdrop = '';
+  let fallback = '';
+  for (const sheet of document.styleSheets) {
+    let rules = null;
+    try { rules = sheet.cssRules; } catch (e) { continue; }
+    for (const r of rules || []) {
+      if (r.selectorText
+          && r.selectorText.indexOf('.mobile-menu.mobile-menu.opacity-100') === 0
+          && r.style.backdropFilter) backdrop = r.style.backdropFilter;
+      // 实底兜底裹在 @supports not (...) 里：Chromium 认这个属性，所以规则
+      // 不会命中，computed 上永远看不到它。只能从 CSSOM 里确认它写对了。
+      if (r.conditionText && r.conditionText.indexOf('backdrop-filter') !== -1) {
+        for (const inner of r.cssRules || []) {
+          if (inner.style && inner.style.backgroundColor) {
+            fallback = inner.style.backgroundColor;
+          }
+        }
+      }
+    }
+  }
   return {
     opacity: cs.opacity,
     bgImage: cs.backgroundImage,
+    bgColor: cs.backgroundColor,
     isolation: cs.isolation,
     animation: cs.animationName,
     afterZ: af.zIndex,
+    gutter: cs.getPropertyValue('--ns-menu-gut').trim(),
+    backdrop: backdrop,
+    fallback: fallback,
+    supportsBackdrop: CSS.supports('backdrop-filter', 'blur(1px)'),
+    navCounterReset: nav ? getComputedStyle(nav).counterReset : '',
+    linkCount: links.length,
+    // ::after 里的 counter() 在 computed style 里不求值，拿到的是字面量，
+    // 所以这里连同 counter-increment 一起看，三样对上才算序号真的接上了。
+    numContent: a0 ? getComputedStyle(a0, '::after').content : '',
+    numIncrement: a0 ? getComputedStyle(a0).counterIncrement : '',
+    linkBorderTop: a0 ? getComputedStyle(a0).borderTopWidth : '',
+    linkPadLeft: a0 ? getComputedStyle(a0).paddingLeft : '',
+    linkTransform: a0 ? getComputedStyle(a0).transform : '',
+    linkDelays: links.map(a => getComputedStyle(a).transitionDelay),
     linkOpacity: [...m.querySelectorAll('a')]
         .map(a => Number(getComputedStyle(a).opacity)),
   };
 }"""
 
 # 把截图丢回浏览器里解码 —— 免掉 Pillow 依赖，浏览器自己就是个 PNG 解码器。
-DECODE_PIXELS = """async ([b64, pts]) => {
+DECODE_PIXELS = """async ([b64, pts, r]) => {
   const img = new Image();
   img.src = 'data:image/png;base64,' + b64;
   await img.decode();
@@ -316,36 +437,66 @@ DECODE_PIXELS = """async ([b64, pts]) => {
   c.height = img.naturalHeight;
   const g = c.getContext('2d');
   g.drawImage(img, 0, 0);
+  // 单点采样在版式一改就会误判 —— ink 版导航是左对齐的，原来那个 (0.12,0.5)
+  // 正好压在白色笔画上，算出来 1.00:1。改成取 (2r+1)² 窗口里的众数色：字形
+  // 笔画在背景窗口里永远是少数派。
   return pts.map(([fx, fy]) => {
-    const d = g.getImageData(Math.min(c.width - 1, Math.floor(c.width * fx)),
-                             Math.min(c.height - 1, Math.floor(c.height * fy)),
-                             1, 1).data;
-    return [d[0], d[1], d[2]];
+    const cx = Math.min(c.width - 1, Math.floor(c.width * fx));
+    const cy = Math.min(c.height - 1, Math.floor(c.height * fy));
+    const x0 = Math.max(0, cx - r);
+    const y0 = Math.max(0, cy - r);
+    const w = Math.min(c.width, cx + r + 1) - x0;
+    const h = Math.min(c.height, cy + r + 1) - y0;
+    const d = g.getImageData(x0, y0, w, h).data;
+    const tally = new Map();
+    let best = 0;
+    let win = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const k = (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+      const n = (tally.get(k) || 0) + 1;
+      tally.set(k, n);
+      if (n > best) { best = n; win = k; }
+    }
+    return [(win >> 16) & 255, (win >> 8) & 255, win & 255];
   });
 }"""
 
 # 避开字形笔画，只采背景
 SAMPLE_POINTS = [(0.08, 0.06), (0.5, 0.22), (0.12, 0.5), (0.85, 0.7), (0.5, 0.96)]
+SAMPLE_RADIUS = 10  # 21x21 窗口取众数
 
 
-def sample_pixels(ctx, png: bytes, points):
+def sample_pixels(ctx, png: bytes, points, radius: int = SAMPLE_RADIUS):
     dec = ctx.new_page()
     dec.goto("about:blank")
-    px = dec.evaluate(DECODE_PIXELS, [base64.b64encode(png).decode(), points])
+    px = dec.evaluate(DECODE_PIXELS,
+                      [base64.b64encode(png).decode(), points, radius])
     dec.close()
     return px
 
 
-def preloader_checks(page, label: str) -> None:
+def preloader_checks(page, label: str, style: str) -> None:
     """加载页：结构 → 进度 → 揭幕。三段都要过。"""
     ssr = page.evaluate("() => window.__ssr")
     check(bool(ssr) and "ns-pre" in ssr.get("cls", ""),
           f"{label}：注水后骨架仍带 ns-pre（class 没被冲掉）", str(ssr))
     check(bool(ssr) and ssr.get("scoped"),
           f"{label}：骨架每个节点都带上游 scope", str(ssr))
-    check(bool(ssr) and "gradient" in ssr.get("bg", ""),
-          f"{label}：背景是自定义渐变，不是上游那片淡紫",
-          str(ssr and ssr.get("bg")))
+    # 上游那片淡紫是 linear-gradient(45deg,#cebdf8,#e2dbf8)。不管换成哪种
+    # 预设，它都必须消失；具体换成什么由 style 决定。
+    check("206, 189, 248" not in str(ssr and ssr.get("bg")),
+          f"{label}：上游那片淡紫已经被盖掉", str(ssr and ssr.get("bg")))
+    if style == "editorial":
+        check(bool(ssr) and ssr.get("bgColor") == "rgb(242, 237, 227)",
+              f"{label}：象牙纸铺底（不是渐变，是一张纸）", str(ssr and ssr.get("bgColor")))
+        check(bool(ssr) and ssr.get("numStyle") == "italic",
+              f"{label}：数字是斜体", str(ssr and ssr.get("numStyle")))
+        check("TheSeasons" in str(ssr and ssr.get("numFamily")),
+              f"{label}：数字用的是衬线 TheSeasons（预载就是为了它）",
+              str(ssr and ssr.get("numFamily")))
+    else:
+        check(bool(ssr) and "gradient" in ssr.get("bg", ""),
+              f"{label}：背景是自定义渐变", str(ssr and ssr.get("bg")))
 
     try:
         page.wait_for_selector(".preloader", state="detached",
@@ -374,7 +525,7 @@ def preloader_checks(page, label: str) -> None:
           f"{label}：不是几个硬编码的档位在跳", f"{len(set(nums))} 个不同值")
 
 
-def menu_checks(ctx, page) -> None:
+def menu_checks(ctx, page, mode: str) -> None:
     """移动端菜单：真的有背景，而且白字压在上面读得清。"""
     print("\n[移动端菜单]")
     btn = page.query_selector(".mobile-menu-button")
@@ -395,10 +546,42 @@ def menu_checks(ctx, page) -> None:
     check(st["isolation"] == "isolate",
           "建了独立层叠上下文（噪点层的 z-index:-1 才不会捅穿父级）",
           st["isolation"])
-    check(st["afterZ"] == "-1", "噪点层压在内容底下", st["afterZ"])
     check(all(o > 0.6 for o in st["linkOpacity"]) if st["linkOpacity"] else False,
           "菜单里的链接没有被压暗到读不清",
           str(st["linkOpacity"]))
+
+    if mode == "ink":
+        # 磨砂：软件渲染下 computed style 会给 none，所以看 CSSOM 里的声明。
+        check("blur(" in st["backdrop"],
+              "ink：CSSOM 里磨砂声明在（无 GPU 的沙箱里 computed 一律是 none，看不了实效)",
+              st["backdrop"])
+        # 兜底规则裹在 @supports not (...) 里。Chromium 认 backdrop-filter，
+        # 规则不命中，computed 上永远是透明 —— 这是对的，别拿 computed 去验。
+        check(st["fallback"] != "",
+              "ink：CSSOM 里有不支持磨砂时的实底兜底规则", st["fallback"])
+        if not st["supportsBackdrop"]:
+            check(st["bgColor"] != "rgba(0, 0, 0, 0)",
+                  "ink：这个浏览器不支持磨砂，实底必须已经顶上", st["bgColor"])
+        check(st["linkCount"] == 4, "ink：四条导航都在索引表里", str(st["linkCount"]))
+        check(st["navCounterReset"].startswith("ns-menu"),
+              "ink：导航列建了计数器", st["navCounterReset"])
+        check(st["numIncrement"].startswith("ns-menu"),
+              "ink：链接自增计数器", st["numIncrement"])
+        check("counter(ns-menu" in st["numContent"],
+              "ink：序号由计数器生成（computed 里 counter() 不求值，只能比字面量）",
+              st["numContent"])
+        check(st["linkBorderTop"] == "1px", "ink：条目之间有发丝线", st["linkBorderTop"])
+        check(st["gutter"] != "", "ink：量度变量算出来了", st["gutter"])
+        # 上游给四条链接挂了 delay-200/250/300/350，我们只加 transform，
+        # 错峰整个复用它们的。四个延迟各不相同 = 错峰还在。
+        check(len(set(st["linkDelays"])) == 4,
+              "ink：错峰入场还在（复用上游 delay-*，没被覆盖成同一个值）",
+              str(st["linkDelays"]))
+        check(st["linkTransform"] in ("none", "matrix(1, 0, 0, 1, 0, 0)"),
+              "ink：菜单打开后条目已归位（没有卡在起始位移上）",
+              st["linkTransform"])
+    else:
+        check(st["afterZ"] == "-1", "噪点层压在内容底下", st["afterZ"])
 
     png = page.screenshot()
     px = sample_pixels(ctx, png, SAMPLE_POINTS)
@@ -419,6 +602,8 @@ def main() -> int:
     story = load_config("story.js")
     expected = story_texts()
     BASE = site["meta"].get("basePath", "/")
+    pre_style = site.get("preloader", {}).get("style", "editorial")
+    menu_mode = site.get("menu", {}).get("background", "ink")
 
     static_checks()
 
@@ -515,11 +700,11 @@ def main() -> int:
             check(page.url == nav_before, "没有触发前端路由", page.url)
 
             # -------------------------------------------------- 5 加载页
-            preloader_checks(page, "加载页")
+            preloader_checks(page, "加载页", pre_style)
 
             # -------------------------------------------------- 6 移动端菜单
             if mobile:
-                menu_checks(ctx, page)
+                menu_checks(ctx, page, menu_mode)
 
             # -------------------------------------------------- 4/8 404 与控制台
             bad = [m for m in missing if not m.startswith("404 http://127.0.0.1:%d/favicon" % PORT)]

@@ -94,13 +94,22 @@ function normalizeSite(raw) {
     site[section] = Object.assign({}, JSON.parse(JSON.stringify(defaults)), site[section] || {});
   }
 
-  // 部署根路径：所有站内资源都是相对引用，只有 404 页需要一个绝对根。
+  // 部署根路径。静态资源是相对引用，但 Nuxt 运行时的 app.baseURL、404 页的
+  // <base> 与返回链接都要绝对根；子路径部署时不改这里首页会直接白屏。
   const base = String(site.meta.basePath || '/');
   if (!base.startsWith('/') || !base.endsWith('/')) {
     errors.push(`site.meta.basePath 必须以 / 开头且以 / 结尾，实际为 ${JSON.stringify(base)}`);
   }
   site.meta.basePath = base;
   site.errorPage.homeUrl = site.errorPage.homeUrl || base;
+
+  // 字体预载默认开。老配置里没这个键，按开处理（预载只影响加载次序，不改
+  // 任何渲染结果，默认开是安全的）。
+  if (site.meta.fontPreload === undefined) site.meta.fontPreload = true;
+  if (typeof site.meta.fontPreload !== 'boolean') {
+    errors.push('site.meta.fontPreload 只能是 true / false，实际为 '
+      + JSON.stringify(site.meta.fontPreload));
+  }
 
   site.meta.ogImage = freeAsset(raw.meta.ogImage, 'meta.ogImage', 'site.meta.ogImage', errors);
   site.meta.favicon = freeAsset(raw.meta.favicon, 'meta.favicon', 'site.meta.favicon', errors);

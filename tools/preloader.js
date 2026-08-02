@@ -1,6 +1,6 @@
 'use strict';
 /**
- * preloader.js — 重做首屏加载页：深蓝品牌渐变 + 真实加载百分比。
+ * preloader.js — 重做首屏加载页：象牙纸 + 墨黑瑞士排印 + 真实加载百分比。
  *
  * 上游长什么样
  * -------------
@@ -9,11 +9,26 @@
  * 站内最大的资源 v20.glb 有 4.3MB，慢网下要等很久，而屏幕上没有任何东西
  * 告诉用户"还要多久"。
  *
- * 改成什么样
- * -----------
- * 深蓝品牌渐变（和移动端菜单同一套色）+ 品牌标识 + 真实百分比 + 进度条。
- * 揭幕动画沿用上游那个圆形遮罩（--reveal-radius 从 0vmax 推到 200vmax）——
- * 深蓝底揭开淡色首屏，对比比原来的"淡紫揭开淡色"更有戏剧性，白赚的。
+ * 改成什么样（style: 'editorial'，默认）
+ * --------------------------------------
+ * 一张象牙色的纸（#f2ede3），左上角一枚墨黑标识，中间一个**巨大的衬线斜体
+ * 数字**（TheSeasons italic，最大 460px），下面一条发丝线和一行疏排小字。
+ * 版面靠左对齐、不居中，靠字号落差（460px : 11px ≈ 42 倍）撑起层次。
+ *
+ * 这里有个一石二鸟的地方：**数字本身就是进度条**。`.ns-pre-val` 用
+ * background-clip:text 把一条 90° 渐变裁进字形里，渐变的分界点绑在
+ * --ns-pre-p 上 —— 加载到 47% 时，"47"这两个字左边 47% 是墨黑、右边是淡墨。
+ * 底下那条发丝线是同一个变量驱动的第二重读数，给渐变不生效的浏览器兜底。
+ *
+ * 为什么不接着用深蓝渐变（style: 'progress'，保留为备选）
+ * -------------------------------------------------------
+ * 上一版加载页和移动端菜单用了**完全相同**的三个蓝 + 相同的光斑色 + 相同的
+ * 手法（线性渐变打底 + 径向光斑 + 噪点）。同一个站里两处大面积色块长得一模
+ * 一样，既没有记忆点，也是典型的"默认审美"。现在两边刻意分家：加载页走浅色
+ * 纸张排印，菜单走墨玻璃（tools/menu.js 的 ink 预设）。深蓝那套降级成
+ * style:'progress'，想要仍然可以配回去。
+ *
+ * 揭幕动画沿用上游那个圆形遮罩（--reveal-radius 从 0vmax 推到 200vmax）。
  *
  * 三处必须严格同步
  * -----------------
@@ -36,7 +51,9 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { isHex6, rgba, fade } = require('./color');
+const {
+  isHex6, rgba, fade, over, contrast,
+} = require('./color');
 
 /**
  * 上游编译产物里 Preloader 的 scoped 属性。
@@ -45,18 +62,67 @@ const { isHex6, rgba, fade } = require('./color');
  */
 const SCOPE = 'data-v-724e2fc4';
 
-const STYLES = new Set(['progress', 'legacy']);
+const STYLES = new Set(['editorial', 'progress', 'legacy']);
 
 const PRELOADER_DEFAULTS = {
-  style: 'progress',
+  style: 'editorial',
+  // editorial 用这两个：纸色和墨色。
+  paper: '#f2ede3',
+  ink: '#14120f',
+  // progress 用这三个。
   background: ['#00276e', '#143a8a', '#062969'],
   accent: '#88aeff',
   glow: ['#4edbef', '#6248a4'],
+  // 三种样式共用。
   mark: 'src/images/svg/logoSimple.svg',
+  markInvert: 'auto',
   showPercent: true,
   tip: '正在加载沉浸式体验',
   revealDuration: 2,
 };
+
+/**
+ * 纸色和墨色之间至少要有的对比度。7:1 = WCAG AAA 正文线。
+ * 加载页整屏就这么点字，配一组看不清的纸墨没有任何理由，所以卡在 AAA
+ * 而不是 AA，而且**不达标直接报错**，不降级、不告警。
+ */
+const PAPER_INK_MIN = 7;
+
+/**
+ * editorial 数字四周补的 padding，单位 em，跟着字号缩放。
+ *
+ * 用途不是留白，是给 background-clip:text 的底图留出斜体字形挑到盒子外面
+ * 的那几截 —— 详见 cssEditorial() 里那段注释。
+ *
+ * 数值是量出来的，不是拍的：真实页面上把数字改成纯墨实心字（不裁），
+ * 1600×900（字号 378px，dsf 2）与 390×844（字号 179px，dsf 3）两档逐列
+ * 数墨迹，再和内容盒四边相减，单位 em ——
+ *
+ *     右挑  7 .174 ┃ 5 .111 ┃ 1 .099 ┃ 9 .081 ┃ 0 .074 ┃ 8 .073 ┃ 3 .057
+ *     左挑  5 .079 ┃ 2 .066 ┃ 3 .053 ┃ 其余 ≤ .006（4/6/7/9 是负的）
+ *     上挑  .016（所有数字一样）；下边不挑，最高的 4 也还差 .216em 到底
+ *
+ * 各留一点余量取整。x 是左右两边之和，换算渐变分界点时要用。
+ */
+const PAD = { top: '.02em', right: '.18em', left: '.08em', x: '.26em' };
+
+/**
+ * 渐变分界点：把 0~1 的进度映射到"字形左缘 ~ 字形右缘"。
+ *
+ *   盒宽 100% = 左padding + 字宽 + 右padding，所以
+ *   字宽 = 100% − PAD.x，分界点 = 左padding + 进度 × 字宽 —— 这是主项，
+ *   保证 50% 时墨色正好吃掉半个字，不快也不慢。
+ *
+ * 两头各加一段 4% 的补偿，专门伺候挑出盒外的那点笔画：
+ *   · 开头 min(1, p×25)：p=0 时分界点必须是 0，否则左挑那截（"5" 的
+ *     .079em）会在整字还是淡墨时先黑一块。
+ *   · 收尾 clamp(0, (p−.96)×25, 1)：p=1 时分界点必须落到盒子右缘之外，
+ *     否则末位 7 的那条尾巴到 100% 还是淡的。
+ * 两段都单调递增，中间 4%~96% 是严格线性，肉眼只会看到均匀推进。
+ */
+const CUT = `calc(min(1,var(--ns-pre-p,0)*25)*${PAD.left}`
+  + ` + var(--ns-pre-p,0)*(100% - ${PAD.x})`
+  + ` + clamp(0,(var(--ns-pre-p,0) - .96)*25,1)*${PAD.right})`;
 
 /** 这个模块会往 HTML 里写的类名，交给 build.js 加进"已知类名"集合。 */
 const PRELOADER_CLASSES = [
@@ -293,10 +359,134 @@ function checkColor(v, where, errors, fallback) {
 }
 
 /**
+ * 解一个"淡墨"：把墨色按某个不透明度压在纸上，取第一个对比度够 target 的。
+ *
+ * 为什么要解不能写死：纸色是可配的。写死一个 #8c8881 在象牙纸上刚好够
+ * 3:1，换成一张更白的纸（比如 #ffffff）就掉到 2.6:1，换成米黄偏深的纸又
+ * 会浪费掉本可以更淡的余地。从 0.2 起每次加一个百分点往下试，第一个够的
+ * 就是"在够看得清的前提下最淡的那一档"。
+ *
+ * 3:1 是 WCAG 对大号文字和图形元素的下限 —— 淡墨只用在百分号、提示语和
+ * 数字未填充的那一半上，都属于这一类。
+ *
+ * @param {string} ink    墨色 #RRGGBB
+ * @param {string} paper  纸色 #RRGGBB
+ * @param {number} target 目标对比度
+ * @returns {string} #RRGGBB
+ */
+function solveFaint(ink, paper, target = 3) {
+  // 整数步进，别让 0.2+0.01*n 的浮点误差决定色值。
+  for (let i = 20; i <= 96; i += 1) {
+    const c = over(ink, paper, i / 100);
+    if (contrast(c, paper) >= target) return c;
+  }
+  return ink;
+}
+
+/**
+ * editorial：象牙纸 + 墨黑排印。
+ *
+ * 版面是左对齐的，不是居中的 —— 居中 + 巨大数字是加载页最常见的那一种长相，
+ * 靠左顶格 + 底部发丝线 + 疏排小字才是印刷品的读法。
+ *
  * 注意单位：站内 html{font-size:10px}，1rem = 10px，Tailwind 的 1 单位也 = 1px。
  * 这里一律写 px，免得和那套换算搅在一起。
  */
-function css(o) {
+function cssEditorial(o) {
+  const { paper, ink, markInvert } = o;
+  const faint = solveFaint(ink, paper); // 淡墨，对纸 ≥3:1
+  const hair = rgba(ink, 0.14); // 发丝线：看得见，但不参与阅读
+
+  // 标识原图是纯白的（logoSimple.svg 里 15 个 fill="white"），压在象牙纸上
+  // 等于没有。brightness(0) 把任何颜色都压成纯黑，比 invert(1) 稳 —— invert
+  // 对彩色 logo 会翻出补色，对白色才刚好是黑色。
+  // 36px 不是随手写的：这个标识是 4×4 网格上的 12 个正方块（viewBox 99，
+  // 每格 24.71 单位）。宽度取 4 的倍数，每格才落在整像素上，边缘不会被
+  // 抗锯齿磨出深浅不一的灰边。36 → 每格 9px（2 倍屏 18px），刚好。
+  const mark = ['align-self:flex-start', 'width:36px', 'height:auto',
+    'margin:0 0 clamp(28px,7vh,76px)'];
+  if (markInvert) mark.push('filter:brightness(0)');
+
+  return [
+    // 底：上游那条 .preloader[data-v-...] 特异度是 (0,2,0)，`.preloader.preloader`
+    // 打平且排在后面，稳赢；scope id 不用硬编码进样式层。
+    // 只覆盖 background 一条 —— --reveal-radius / --reveal-feather / overflow
+    // 仍然由上游规则提供，揭幕遮罩原样保留。
+    `.preloader.preloader{background:${paper}}`,
+
+    `.ns-pre{display:flex;flex-direction:column;align-items:stretch;`
+      + `width:min(88vw,720px);color:${ink};text-align:left;`
+      + `font-family:var(--font-sans-regular),sans-serif;`
+      + `will-change:opacity,transform}`,
+
+    `.ns-pre-mark{${mark.join(';')}}`,
+    '.ns-pre-mark img{display:block;width:100%;height:auto}',
+
+    // 字号上限 460px、下限 72px，中间跟着 min(46vw,42vh) 走 —— 竖屏手机受
+    // 46vw 约束（三位数 "100" 才不会顶出容器），横屏笔记本受 42vh 约束
+    // （矮视口下不会把发丝线和小字挤出屏幕）。
+    // line-height:.82 是把数字上下的行距留白收掉，让它真的像一块印上去的字。
+    '.ns-pre-num{display:flex;align-items:baseline;margin:0;'
+      + 'font-family:var(--font-serif),serif;font-style:italic;font-weight:400;'
+      + 'font-size:clamp(72px,min(46vw,42vh),460px);line-height:.82;'
+      + 'letter-spacing:-.02em;'
+      + 'font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}',
+
+    // 数字本身就是进度条：一条 90° 硬边渐变裁进字形，分界点绑 --ns-pre-p。
+    //
+    // 三件事都得在这一条规则里办妥：
+    //
+    // ① 整块放进 @supports。color:transparent 一旦在不支持 background-clip
+    //    的浏览器上生效，整个数字会直接消失；不支持就退回纯墨色，照样读得出。
+    //    条件里额外要一句 clamp()，因为分界点用了 min()/clamp()：万一遇上
+    //    支持 -webkit-background-clip 却不认 clamp() 的老 WebKit，渐变会在
+    //    计算期整条作废（回落成 none），配上 color:transparent 又是白屏。
+    //
+    // ② padding 不是排版留白，是修 bug 的。background-clip:text 的绘制区域
+    //    仍被盒子框着，斜体字形挑到盒外的那截拿不到底图，就被整整齐齐削掉一
+    //    条竖线 —— 末位 7 的尾巴、"5" 的左肩、所有数字的顶尖都中招。补完
+    //    padding 再用等量负 margin 抵掉，字形位置、百分号位置、左侧栏对齐线
+    //    一个都不动，纯粹给底图扩地方。
+    //
+    // ③ 分界点改用 --ns-pre-cut（见上面 CUT 的注释），把 padding 从映射里
+    //    减回去。不这么做的话渐变的 100% 会按"字宽 + PAD"算，两位数时
+    //    PAD/字宽 ≈ 29%，走到 85% 整个字就填满了，剩下 15% 干看着。
+    '@supports ((-webkit-background-clip:text) or (background-clip:text))'
+      + ' and (width:clamp(1px,2px,3px)){'
+      + `.ns-pre-val{margin:-${PAD.top} -${PAD.right} 0 -${PAD.left};`
+      + `padding:${PAD.top} ${PAD.right} 0 ${PAD.left};`
+      + `--ns-pre-cut:${CUT};`
+      + `background-image:linear-gradient(90deg,${ink} 0,`
+      + `${ink} var(--ns-pre-cut),`
+      + `${faint} var(--ns-pre-cut),${faint} 100%);`
+      + '-webkit-background-clip:text;background-clip:text;color:transparent}}',
+
+    // 百分号回到无衬线、正体、11~15px：和 460px 的斜体数字拉出约 40 倍字号
+    // 落差，层次全靠这个落差撑，不靠加装饰。
+    `.ns-pre-pct{font-family:var(--font-sans-regular),sans-serif;font-style:normal;`
+      + `font-size:clamp(11px,1.4vw,15px);letter-spacing:.22em;`
+      + `margin-left:clamp(10px,1.6vw,22px);color:${faint}}`,
+
+    // 发丝线：1px 的第二重读数。数字那层渐变不生效时，这条还在。
+    `.ns-pre-bar{position:relative;width:100%;height:1px;`
+      + `margin-top:clamp(22px,5vh,52px);background:${hair};overflow:hidden}`,
+    // scaleX 只走合成层，不触发布局；--ns-pre-p 由运行时每帧写在 .ns-pre 上。
+    `.ns-pre-bar i{position:absolute;inset:0;transform-origin:left center;`
+      + `transform:scaleX(var(--ns-pre-p,0));background:${ink}}`,
+
+    // 疏排 .26em 是中文小字当标签用的排法；右边补回 -.26em，免得最后一个字
+    // 后面那道空隙把整行推得不齐。
+    `.ns-pre-tip{margin:14px -.26em 0 0;font-size:11px;line-height:1.6;`
+      + `letter-spacing:.26em;color:${faint}}`,
+  ].join('\n');
+}
+
+/**
+ * progress：深蓝渐变 + 光斑 + 进度条。备选，不是默认。
+ *
+ * 注意单位：同上，一律写 px。
+ */
+function cssProgress(o) {
   const [c0, c1, c2] = o.background;
   const [g0, g1] = o.glow;
   return [
@@ -313,8 +503,9 @@ function css(o) {
       + 'font-family:var(--font-sans-regular),sans-serif;'
       + 'will-change:opacity,transform}',
 
-    '.ns-pre-mark{width:40px;margin-bottom:30px;opacity:.9;'
-      + 'animation:ns-pre-pulse 2.6s ease-in-out infinite}',
+    `.ns-pre-mark{width:40px;margin-bottom:30px;opacity:.9;`
+      + `${o.markInvert ? 'filter:brightness(0);' : ''}`
+      + `animation:ns-pre-pulse 2.6s ease-in-out infinite}`,
     '.ns-pre-mark img{display:block;width:100%;height:auto}',
     '@keyframes ns-pre-pulse{0%,100%{opacity:.5;transform:scale(.94)}50%{opacity:1;transform:scale(1)}}',
 
@@ -365,6 +556,27 @@ function buildPreloader(site) {
   }
   // legacy = 原封不动保留上游的 loader.gif，一个字节都不改。
   if (style === 'legacy') return none;
+
+  const paper = checkColor(p.paper, 'paper', errors, PRELOADER_DEFAULTS.paper);
+  const ink = checkColor(p.ink, 'ink', errors, PRELOADER_DEFAULTS.ink);
+  // 只有 editorial 会用到纸墨，别的样式配错了也不该拦着构建。
+  if (style === 'editorial') {
+    const c = contrast(paper, ink);
+    if (c < PAPER_INK_MIN) {
+      errors.push(`site.preloader: paper ${paper} 和 ink ${ink} 的对比度只有 `
+        + `${c.toFixed(2)}:1，加载页要求至少 ${PAPER_INK_MIN}:1（WCAG AAA）。`
+        + '把纸调浅或者把墨调深。');
+    }
+  }
+
+  // 'auto'：浅底（editorial）要把白标识压成黑的，深底（progress）不用动。
+  if (p.markInvert !== 'auto' && typeof p.markInvert !== 'boolean') {
+    errors.push(`site.preloader.markInvert: 需要 true / false / 'auto'，`
+      + `实际拿到 ${JSON.stringify(p.markInvert)}`);
+  }
+  const markInvert = p.markInvert === 'auto'
+    ? style === 'editorial'
+    : p.markInvert === true;
 
   const bg = Array.isArray(p.background) && p.background.length === 3
     ? p.background.map((c, i) => checkColor(c, `background[${i}]`, errors,
@@ -476,9 +688,11 @@ function buildPreloader(site) {
   }
 
   return {
-    css: css({
-      background: bg, glow, accent,
-    }),
+    css: style === 'editorial'
+      ? cssEditorial({ paper, ink, markInvert })
+      : cssProgress({
+        background: bg, glow, accent, markInvert,
+      }),
     errors,
     anchors,
     classes: PRELOADER_CLASSES,
@@ -505,6 +719,10 @@ module.exports = {
   PRELOADER_DEFAULTS,
   PRELOADER_CLASSES,
   STYLES,
+  PAPER_INK_MIN,
+  PAD,
+  CUT,
+  solveFaint,
   SCOPE,
   nodes,
   toHtml,
