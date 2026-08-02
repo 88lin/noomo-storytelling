@@ -1,14 +1,11 @@
-name: 一次性导入视觉改版
-
+name: 一次性导入视觉改版 v2
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths: ['.github/workflows/import.yml']
-
 permissions:
   contents: write
-
 jobs:
   import:
     runs-on: ubuntu-latest
@@ -17,25 +14,24 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-
       - name: 拉回分片并按 sha256 锁定校验
         run: |
           set -euo pipefail
           git fetch --no-tags origin +refs/heads/import-transit:refs/remotes/origin/import-transit
-          for i in 00 01 02 03; do
+          for i in 00 01 02 03 04 05 06; do
             git show "origin/import-transit:import/seg_$i"
           done > /tmp/p.b64
+          echo "base64 字符数（去换行）: $(tr -d '\n' < /tmp/p.b64 | wc -c)  期望 72048"
           base64 -d /tmp/p.b64 > /tmp/p.bz2
           echo "32e1132a7bb373dbd603650df68d054ffeea02fe05c6c83c9c5a9332611740f7  /tmp/p.bz2" | sha256sum -c -
           bunzip2 -c /tmp/p.bz2 > /tmp/d.patch
           echo "91720ac73eac0572a78c756bb9293da676970f6053adc3ab03c1336736a4ea51  /tmp/d.patch" | sha256sum -c -
-
       - name: 应用补丁
         run: |
           set -euo pipefail
+          git apply --whitespace=nowarn --check /tmp/d.patch
           git apply --whitespace=nowarn --stat /tmp/d.patch
           git apply --whitespace=nowarn /tmp/d.patch
-
       - name: 提交、删除自举文件与中转分支
         run: |
           set -euo pipefail
@@ -43,6 +39,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm -q .github/workflows/import.yml
           git add -A
+          git status --short
           git commit -m "视觉改版三项 + 全仓审查 + 文档重写"
           git push origin HEAD:main
           git push origin --delete import-transit
