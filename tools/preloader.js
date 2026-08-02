@@ -54,6 +54,7 @@ const path = require('path');
 const {
   isHex6, rgba, fade, over, contrast,
 } = require('./color');
+const { grainRule, grainLift } = require('./grain');
 
 /**
  * 上游编译产物里 Preloader 的 scoped 属性。
@@ -87,6 +88,24 @@ const PRELOADER_DEFAULTS = {
  * 而不是 AA，而且**不达标直接报错**，不降级、不告警。
  */
 const PAPER_INK_MIN = 7;
+
+/**
+ * 小字（百分号、提示语）对纸的对比度下限。
+ *
+ * 提示语是 11px —— WCAG 里这属于「正文」，不是「大号文字」，AA 线就是 4.5:1。
+ * 上一版这里是 3:1，那是**大号文字**的线，套在 11px 疏排的中文小字上是错的：
+ * 实测解出来的淡墨 #8c8881 对象牙纸只有 3.02:1，弱视用户基本读不到。
+ */
+const FAINT_TEXT_MIN = 4.5;
+
+/**
+ * 数字未填充那一半对纸的对比度下限。
+ *
+ * 这一半的字号下限是 72px，实际常在 200~420px，稳稳落在 WCAG 的「大号文字」
+ * 里，线是 3:1。故意和小字分开解：填充/未填充两半的明度差就是进度读数，
+ * 把未填充那半也拉到 4.5:1 会让两半几乎一样黑，进度就看不出来了。
+ */
+const FAINT_NUM_MIN = 3;
 
 /**
  * editorial 数字四周补的 padding，单位 em，跟着字号缩放。
@@ -123,6 +142,38 @@ const PAD = { top: '.02em', right: '.18em', left: '.08em', x: '.26em' };
 const CUT = `calc(min(1,var(--ns-pre-p,0)*25)*${PAD.left}`
   + ` + var(--ns-pre-p,0)*(100% - ${PAD.x})`
   + ` + clamp(0,(var(--ns-pre-p,0) - .96)*25,1)*${PAD.right})`;
+
+/**
+ * 分界点两侧各羽化多少（em，跟着字号缩放）。
+ *
+ * 上一版是硬边：一条笔直的竖线从曲线笔画中间切过去，读起来不像"填到这里
+ * 了"，像渲染坏了。羽化一段就变成墨在往前洇。
+ *
+ * 为什么用 em 不用 %：% 是相对渐变盒宽的，而盒宽跟着位数变（"7" / "37" /
+ * "100" 差一倍多），同一个百分数在个位数时的实际宽度只有三位数时的三分之
+ * 一，羽化会忽宽忽窄。em 跟字号走，位数再变羽化宽度不变。
+ *
+ * 取值必须**小于 PAD.left 和 PAD.right**，这是个硬约束（测试守着）：
+ *   · p=0 时分界点在 0，羽化带整个落在左 padding（.08em）里；
+ *   · p=1 时分界点在 100%，羽化带整个落在右 padding（.18em）里。
+ * 两处 padding 里都没有字形，所以两端的羽化带在屏幕上不显形 —— 0% 是整字
+ * 淡墨、100% 是整字实墨，一点都不脏。.035em 对两边都留了一倍以上余量。
+ */
+const FEATHER = '.035em';
+
+/**
+ * 纸面的两极色偏（不是"装饰"，是给空场定调子）。
+ *
+ * 上一版整屏是一块死平的单色，内容又只占左半边，右半屏读起来是"没画完"。
+ * 加一道从左上偏亮、到右下偏暗的极缓渐变，纸就有了厚薄，空场也就成了留白。
+ *
+ * 两个值都从 paper / ink 现算，不写死颜色 —— 换一张纸（哪怕换成冷灰）色偏
+ * 自动跟着走，不会突然冒出一块和主色不搭的橙。
+ *   亮极 = 纸往白里推 50%，只会抬对比度，不用验；
+ *   暗极 = 纸里掺 5.5% 墨，是唯一会吃对比度的一项，worstPaper() 把它算进去。
+ */
+const WASH_LIGHT = 0.5;
+const WASH_DARK = 0.055;
 
 /** 这个模块会往 HTML 里写的类名，交给 build.js 加进"已知类名"集合。 */
 const PRELOADER_CLASSES = [
@@ -289,7 +340,14 @@ const esc = (s) => String(s)
   .replace(/"/g, '&quot;');
 
 /**
- * @param {{mark:?{out:string,alt:string}, showPercent:boolean, tip:string}} o
+ * @param {{mark:?{out:string,alt:string}, showPercent:boolean, tip:string,
+ *          fill:boolean}} o
+ *   fill —— 发丝线里要不要那根会伸长的 <i>。
+ *   editorial 不要：进度已经由数字的墨色填充表达了，再让线也从左往右长，
+ *   两条分界永远对不齐（线是版心宽 680px，数字是内容宽 ~408px，86% 处差
+ *   244px），看起来像两个各说各话的进度条 —— 实拍对比见 shots/pre6-d 与
+ *   pre6-e。editorial 的线因此降级成纯版心地平线：上面是标识和数字，下面是
+ *   提示，右端接住百分号。progress 预设没有大数字，那条填充是唯一读数，留着。
  * @returns {object[]} 节点树（.wrapper 的直接子节点）
  */
 function nodes(o) {
@@ -317,7 +375,11 @@ function nodes(o) {
       ],
     });
   }
-  out.push({ tag: 'div', attrs: [['class', 'ns-pre-bar']], kids: [{ tag: 'i' }] });
+  out.push({
+    tag: 'div',
+    attrs: [['class', 'ns-pre-bar']],
+    kids: o.fill ? [{ tag: 'i' }] : [],
+  });
   if (o.tip) out.push({ tag: 'p', attrs: [['class', 'ns-pre-tip']], text: o.tip });
   return out;
 }
@@ -366,11 +428,15 @@ function checkColor(v, where, errors, fallback) {
  * 会浪费掉本可以更淡的余地。从 0.2 起每次加一个百分点往下试，第一个够的
  * 就是"在够看得清的前提下最淡的那一档"。
  *
- * 3:1 是 WCAG 对大号文字和图形元素的下限 —— 淡墨只用在百分号、提示语和
- * 数字未填充的那一半上，都属于这一类。
+ * target 由调用方给：小字走 FAINT_TEXT_MIN（4.5，WCAG 正文 AA），数字未填充
+ * 的那一半走 FAINT_NUM_MIN（3，WCAG 大号文字）。两处不能共用一个值，理由见
+ * 那两个常量的注释。
+ *
+ * 注意传进来的 paper 应该是**最暗那一档纸**（worstPaper），不是名义纸色 ——
+ * 纸上叠了色偏和颗粒，字压在最暗的那一点上才是最坏情况。
  *
  * @param {string} ink    墨色 #RRGGBB
- * @param {string} paper  纸色 #RRGGBB
+ * @param {string} paper  纸色 #RRGGBB（用最坏的那一档）
  * @param {number} target 目标对比度
  * @returns {string} #RRGGBB
  */
@@ -384,6 +450,21 @@ function solveFaint(ink, paper, target = 3) {
 }
 
 /**
+ * 纸面上最暗的那一点：暗极色偏压到底 + 颗粒往暗侧 2σ。
+ *
+ * 深色字压在浅底上，吃亏的是纸变暗的那一侧 —— 和菜单那边（白字压深底、怕
+ * 底变亮）正好相反，所以 grainLift 传的是**负** k。
+ * 2σ 覆盖 97.7% 的颗粒；剩下 2.3% 是单个像素级别的噪点，落不到整个字上。
+ *
+ * @param {string} paper 名义纸色
+ * @param {string} ink   墨色
+ * @returns {string} #RRGGBB
+ */
+function worstPaper(paper, ink) {
+  return grainLift(over(ink, paper, WASH_DARK), 'light', -2);
+}
+
+/**
  * editorial：象牙纸 + 墨黑排印。
  *
  * 版面是左对齐的，不是居中的 —— 居中 + 巨大数字是加载页最常见的那一种长相，
@@ -394,28 +475,74 @@ function solveFaint(ink, paper, target = 3) {
  */
 function cssEditorial(o) {
   const { paper, ink, markInvert } = o;
-  const faint = solveFaint(ink, paper); // 淡墨，对纸 ≥3:1
+  // 三档墨，都对着**最暗那一档纸**解，不对名义纸色解 —— 纸上叠了色偏和颗粒。
+  const worst = worstPaper(paper, ink);
+  const faint = solveFaint(ink, worst, FAINT_TEXT_MIN); // 小字，≥4.5:1
+  const ghost = solveFaint(ink, worst, FAINT_NUM_MIN); // 数字未填充那半，≥3:1
   const hair = rgba(ink, 0.14); // 发丝线：看得见，但不参与阅读
+  const washA = over('#ffffff', paper, WASH_LIGHT); // 纸的亮极
+  const washB = over(ink, paper, WASH_DARK); // 纸的暗极
 
   // 标识原图是纯白的（logoSimple.svg 里 15 个 fill="white"），压在象牙纸上
   // 等于没有。brightness(0) 把任何颜色都压成纯黑，比 invert(1) 稳 —— invert
   // 对彩色 logo 会翻出补色，对白色才刚好是黑色。
-  // 36px 不是随手写的：这个标识是 4×4 网格上的 12 个正方块（viewBox 99，
+  // 48px 不是随手写的：这个标识是 4×4 网格上的 12 个正方块（viewBox 99，
   // 每格 24.71 单位）。宽度取 4 的倍数，每格才落在整像素上，边缘不会被
-  // 抗锯齿磨出深浅不一的灰边。36 → 每格 9px（2 倍屏 18px），刚好。
-  const mark = ['align-self:flex-start', 'width:36px', 'height:auto',
-    'margin:0 0 clamp(28px,7vh,76px)'];
+  // 抗锯齿磨出深浅不一的灰边。48 → 每格 12px（2 倍屏 24px），刚好。
+  // 上一版 36px 在 360px 高的数字旁边小得像个错放的图标，比例压不住。
+  // 标识留在版心左上，跟着左轴走。
+  //
+  // 这里绕过两条弯路，都记下来免得再走一遍：
+  //
+  //   · 挪到版心右上（align-self:flex-end）：版心又窄又垂直居中，标识就吊在
+  //     右侧半空中，既不贴角也不挨着任何东西，比原样更糟。
+  //   · 出流钉到整屏左上角（position:absolute + top/left）：**定位错元素**。
+  //     上游给 .wrapper 挂了 will-change:opacity,transform，而 will-change
+  //     里带 transform 的元素会成为绝对定位后代的包含块 —— 于是 top/left
+  //     不是从屏幕角算，是从版心左上角算，标识直接压在数字上。要绕开就得去
+  //     覆盖上游的 will-change，为了摆一个 36px 的图去动人家的合成层提示，
+  //     不划算。
+  //
+  // 留在流里其实没问题：上一版看着"三条左边线不齐"，主因是数字和发丝线之间
+  // 空着一个 130px 的洞，整块散着。洞收掉之后，标识、发丝线、数字那根细尾巴
+  // 三者的左缘差不到 20px，读起来就是一条轴 —— 斜体数字的细尾巴挑出去一点
+  // 正是正经的视觉对齐（optical margin alignment）。
+  const mark = ['align-self:flex-start', 'width:48px', 'height:auto',
+    'margin:0 0 clamp(20px,4.6vh,48px)'];
   if (markInvert) mark.push('filter:brightness(0)');
 
   return [
     // 底：上游那条 .preloader[data-v-...] 特异度是 (0,2,0)，`.preloader.preloader`
     // 打平且排在后面，稳赢；scope id 不用硬编码进样式层。
-    // 只覆盖 background 一条 —— --reveal-radius / --reveal-feather / overflow
-    // 仍然由上游规则提供，揭幕遮罩原样保留。
-    `.preloader.preloader{background:${paper}}`,
+    // 只覆盖 background / isolation —— --reveal-radius / --reveal-feather /
+    // overflow 仍然由上游规则提供，揭幕遮罩原样保留。
+    //
+    // isolation:isolate 是给颗粒层用的：颗粒是一条 z-index:-1 的 ::after，
+    // 父元素不自己建层叠上下文的话它会掉到父背景**底下**，什么都看不见。
+    `.preloader.preloader{background-color:${paper};background-image:`
+      + `radial-gradient(76% 60% at 6% 0%,${washA},${fade(washA)} 62%),`
+      + `radial-gradient(98% 86% at 98% 100%,${washB},${fade(washB)} 66%);`
+      + 'isolation:isolate}',
 
+    // 颗粒。三个类名叠着写是为了压过上游的
+    // `.preloader--revealing[data-v-724e2fc4]:after{opacity:1}`（特异度 0,2,1）——
+    // 那条会在揭幕时把颗粒层的 opacity 顶成 1，整屏突然爬满噪点。
+    // 三类 (0,3,1) 稳过。
+    grainRule('.preloader.preloader.preloader', { surface: 'light' }),
+
+    // 版心 680px 是量出来的，不是拍的：字号上限受 40vh 约束，1600×900 下
+    // 解出 360px；TheSeasons italic 三位数 "100" 在这个字号下宽 612px，加上
+    // 间距和百分号约 647px。680 刚好兜住最宽的一帧，于是从 0 到 100 全程
+    // 版心不跳，发丝线的长度是稳的。
+    //
+    // 上一版试过 1120px，是错的：两位数只有 408px，百分号被 space-between
+    // 甩到 690px 开外，中间那片空既不是留白也不是内容 —— 读起来是散架不是
+    // 张力。排印里的空隙要跟内容同一个数量级才成立。
+    //
+    // 86vw 而不是 92vw：390px 竖屏下左边距 27px，减掉斜体 3/5 往左挑的
+    // .079em（约 13px），字形最左还剩 14px 不贴边。92vw 只剩 3px。
     `.ns-pre{display:flex;flex-direction:column;align-items:stretch;`
-      + `width:min(88vw,720px);color:${ink};text-align:left;`
+      + `width:min(86vw,680px);color:${ink};text-align:left;`
       + `font-family:var(--font-sans-regular),sans-serif;`
       + `will-change:opacity,transform}`,
 
@@ -426,9 +553,18 @@ function cssEditorial(o) {
     // 46vw 约束（三位数 "100" 才不会顶出容器），横屏笔记本受 42vh 约束
     // （矮视口下不会把发丝线和小字挤出屏幕）。
     // line-height:.82 是把数字上下的行距留白收掉，让它真的像一块印上去的字。
-    '.ns-pre-num{display:flex;align-items:baseline;margin:0;'
+    // justify-content:space-between 把这一行撑成"数字顶左、百分号顶右"，
+    // 两头各钉一个东西，下面那条发丝线才有两个端点可以呼应。
+    //
+    // margin-bottom 的负值是修一个看不见的洞：line-height:.82 之后行盒底比
+    // 最深的字形还低 .216em（量出来的，所有数字都够不到底），叠上发丝线自己
+    // 的 margin-top，数字和线之间会空出一段快 130px 的死区，整块版面被撑散。
+    // 收回 .18em，剩 .036em 余量，谁也不会被切到。
+    '.ns-pre-num{display:flex;align-items:baseline;'
+      + 'justify-content:space-between;gap:clamp(16px,4vw,72px);'
+      + 'margin:0 0 -.18em;'
       + 'font-family:var(--font-serif),serif;font-style:italic;font-weight:400;'
-      + 'font-size:clamp(72px,min(46vw,42vh),460px);line-height:.82;'
+      + 'font-size:clamp(72px,min(42vw,40vh),420px);line-height:.82;'
       + 'letter-spacing:-.02em;'
       + 'font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}',
 
@@ -457,22 +593,33 @@ function cssEditorial(o) {
       + `padding:${PAD.top} ${PAD.right} 0 ${PAD.left};`
       + `--ns-pre-cut:${CUT};`
       + `background-image:linear-gradient(90deg,${ink} 0,`
-      + `${ink} var(--ns-pre-cut),`
-      + `${faint} var(--ns-pre-cut),${faint} 100%);`
+      + `${ink} calc(var(--ns-pre-cut) - ${FEATHER}),`
+      + `${ghost} calc(var(--ns-pre-cut) + ${FEATHER}),${ghost} 100%);`
       + '-webkit-background-clip:text;background-clip:text;color:transparent}}',
 
-    // 百分号回到无衬线、正体、11~15px：和 460px 的斜体数字拉出约 40 倍字号
-    // 落差，层次全靠这个落差撑，不靠加装饰。
+    // 百分号：从 15px 上限提到 26px，并且改用实墨。
+    //
+    // 上一版它是 11px 的淡墨，贴在数字右边、悬在半空中，既不是标签也不是
+    // 内容，纯粹漂着。现在它被 space-between 顶到版心右端，成了这一行的右
+    // 端点 —— 是个有位置的东西了，就得有相应的份量：字号翻一倍多，颜色回
+    // 到实墨，疏排 .24em 让它横向占住一小段，和左边 420px 的数字遥相呼应。
+    // 40 倍字号落差降到 16 倍，层次照样够，但右端不再是个可有可无的小点。
+    // 右侧 -.24em 补回疏排在最后一个字后面留的那道空隙，否则顶不齐右缘。
     `.ns-pre-pct{font-family:var(--font-sans-regular),sans-serif;font-style:normal;`
-      + `font-size:clamp(11px,1.4vw,15px);letter-spacing:.22em;`
-      + `margin-left:clamp(10px,1.6vw,22px);color:${faint}}`,
+      + `font-size:clamp(13px,2vw,26px);letter-spacing:.24em;`
+      + `margin:0 -.24em 0 0;color:${ink}}`,
 
-    // 发丝线：1px 的第二重读数。数字那层渐变不生效时，这条还在。
-    `.ns-pre-bar{position:relative;width:100%;height:1px;`
-      + `margin-top:clamp(22px,5vh,52px);background:${hair};overflow:hidden}`,
-    // scaleX 只走合成层，不触发布局；--ns-pre-p 由运行时每帧写在 .ns-pre 上。
-    `.ns-pre-bar i{position:absolute;inset:0;transform-origin:left center;`
-      + `transform:scaleX(var(--ns-pre-p,0));background:${ink}}`,
+    // 发丝线：版心的地平线，静态。上面是标识和数字，下面是提示，右端接住
+    // 百分号 —— 它的职责是给这块排印一条底边，不是第二个进度条。
+    //
+    // 这里砍掉了一版会伸长的填充条。砍的理由是实拍出来的：线是版心宽
+    // （680px），数字是内容宽（两位数约 408px），同一个 --ns-pre-p 画出来的
+    // 两条分界在 86% 处差 244px，肉眼直接读成"线跑得比数字快"。对比图
+    // shots/pre6-d-desktop-86.png（带填充）与 pre6-e-desktop-86.png（静态）。
+    // 想让两条对齐就得把数字的排版宽度传给兄弟元素，CSS 做不到；与其塞一个
+    // 会说谎的指示器，不如让唯一的读数干净。
+    `.ns-pre-bar{width:100%;height:1px;`
+      + `margin-top:clamp(18px,3.4vh,38px);background:${hair}}`,
 
     // 疏排 .26em 是中文小字当标签用的排法；右边补回 -.26em，免得最后一个字
     // 后面那道空隙把整行推得不齐。
@@ -606,7 +753,7 @@ function buildPreloader(site) {
       + '想要空白底就把 style 设成 legacy 再自行调整。');
   }
 
-  const tree = nodes({ mark, showPercent, tip });
+  const tree = nodes({ mark, showPercent, tip, fill: style !== 'editorial' });
   const html = tree.map(toHtml).join('');
   const vnodes = tree.map((n) => toVnode(n, true)).join(',');
 
@@ -720,9 +867,15 @@ module.exports = {
   PRELOADER_CLASSES,
   STYLES,
   PAPER_INK_MIN,
+  FAINT_TEXT_MIN,
+  FAINT_NUM_MIN,
+  FEATHER,
+  WASH_LIGHT,
+  WASH_DARK,
   PAD,
   CUT,
   solveFaint,
+  worstPaper,
   SCOPE,
   nodes,
   toHtml,

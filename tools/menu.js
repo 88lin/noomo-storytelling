@@ -1,6 +1,6 @@
 'use strict';
 /**
- * menu.js — 由 config/site.js 的 menu 段生成移动端菜单的背景样式。
+ * menu.js — 由 config/site.js 的 menu 段生成移动端菜单的背景样式与版式。
  *
  * 这是在修一个上游的真实 bug
  * ---------------------------
@@ -37,26 +37,40 @@
  * `<header class="fixed z-10">` 里，logo 和关闭按钮在 `.container.relative.z-2`
  * 里，`.mobile-menu` 的 z-index 是 auto —— 也就是说容器永远盖在菜单背景之上，
  * 加背景不会遮住 logo 和关闭按钮（这点实测确认过）。
- * 噪点层用 `::after` 绝对定位实现，但绝对定位元素默认画在普通流内容**之后**，
+ * 颗粒层用 `::after` 绝对定位实现，但绝对定位元素默认画在普通流内容**之后**，
  * 会盖住导航文字；给它 `z-index:-1` 就落到「背景之上、内容之下」那一层。
  * 配合父元素 `isolation:isolate`，`mix-blend-mode` 只跟菜单自己的背景混合，
  * 不会去和后面的 3D 画布叠加。
  *
- * 默认预设为什么是 ink 而不是 aurora
- * -----------------------------------
- * aurora 那套（深蓝线性渐变 + 三团径向光斑 + 噪点）和上一版加载页用的是
- * **完全相同**的三个蓝、相同的光斑色、相同的手法。同一个站里两处大面积色块
- * 长得一模一样，既没有记忆点，也是典型的"默认审美"。而且它只解决了"有没有
- * 底色"，没有解决"菜单本身长什么样"—— 四个居中的白字、64px 等距、没有层次。
+ * 默认预设 frost：这一版重做了什么
+ * --------------------------------
+ * 上一版默认的 ink 有四个具体毛病，都是看着截图逐条列的：
  *
- * ink 换的是**手法**，不是颜色：
- *   底    近黑墨色（#0c0c0e）的竖向三段渐变，从 90% 压到 97% 不透明度，
- *         配 backdrop-filter 的模糊 + 轻微增饱和 —— 背后的 3D 场景不是被
- *         盖掉，是被"磨"进底色里，顶部略透、底部近实。
- *   版    导航从居中列表改成**通栏索引表**：每一条自己占一行，上边一条发丝线，
- *         左边是标题、右边是 01/02/03/04 的序号，发丝线通栏、文字受量度约束。
- *   动    每条打开时从下方 14px 抬起。错峰直接复用上游自己的 delay-200/250/
- *         300/350（见下面 inkRules 里的说明），不另外写一套。
+ *   1. 它是一块**平的炭灰板** —— 不是黑、不是彩色、没有材质，读起来像
+ *      "没做样式的深色 div"。
+ *   2. `backdrop-filter: blur(26px)` **完全白费**：底色不透明度是 .90→.97，
+ *      背后的 3D 场景一点都透不出来，花了 GPU 却什么都没换到。
+ *   3. 四条**通栏满宽分隔线**把导航做成了"系统设置列表"，不是叙事页的导航。
+ *   4. 序号 01–04 被推到**最右边缘**，标签在左，390px 宽的屏幕中间空出一大片
+ *      死区。
+ *
+ * frost 换的不只是配色，是三件事：
+ *
+ *   材质  底色 + 四角彩晕 + 1px 细网格 + 颗粒，四层叠出"带颜色的磨砂玻璃"。
+ *         这套材质抽在 tools/grain.js 里，和加载页共用同一份实现和同一组
+ *         标定参数（参考 https://solitude.js.org/ 的首屏，标定过程见 grain.js）。
+ *   版式  去掉所有通栏线；序号回到文字列里，做成标签正上方的小上标；导航块
+ *         真正垂直居中；下划线只贴着文字本身，随打开动画从左往右画出来。
+ *   预算  白字要 7:1，底色相对亮度就必须 Y ≤ 0.10；这条线以下每个色相能有
+ *         多彩是硬性锁死的。四个晕色因此不是挑好看的，而是**逐色相解出
+ *         天花板再取在天花板上**（见下面 FROST_WEIGHTS 上方的表）。
+ *
+ * 关于 backdrop-filter：frost 这一版**故意不用**。第 2 条毛病的正解不是
+ * "把底色调透一点让模糊有事做"，而是承认在这个亮度预算下模糊根本没有可做
+ * 的事 —— 彩晕铺满之后背后透出来的一点点全被盖掉了。所以直接删掉，省下
+ * 低端 Android 每帧一次的全屏采样。ink 预设那边层次结构不同，保留。
+ *
+ * ink 保留为可选预设（`background: 'ink'`），没有删。
  *
  * 序号用 CSS 计数器（counter-reset / counter-increment / counter()）而不是
  * 写死 content:"01"…"04"，这样导航条目数变了序号自己跟着变，不用改样式。
@@ -64,16 +78,23 @@
 const {
   isHex6, rgba, fade, contrast, over,
 } = require('./color');
+const {
+  MENU_MIN, grainRule, meshLayers, gridLayers, worstCaseContrast, dec,
+} = require('./grain');
 
 /** 可选的背景预设。none = 什么都不注入（保持上游行为，纯逃生口）。 */
-const MENU_MODES = new Set(['ink', 'aurora', 'gradient', 'frost', 'none']);
+const MENU_MODES = new Set(['frost', 'ink', 'aurora', 'gradient', 'none']);
 
 const MENU_DEFAULTS = {
-  background: 'ink',
-  // ink 用这两个
+  background: 'frost',
+  // frost / ink 用这两个
   ink: '#0c0c0e',
   index: true,
-  // aurora / gradient / frost 用这两个
+  // frost 独有。顺序 = 左上 / 右上 / 左下 / 右下，走一段蓝→紫→玫→红的色相旅程。
+  bloom: ['#0055ba', '#8000e0', '#a9007b', '#b4003b'],
+  grid: true,
+  backdrop: '#ffffff',
+  // aurora / gradient 用这两个
   colors: ['#00276e', '#143a8a', '#062969'],
   glow: ['#4edbef', '#88aeff', '#6248a4'],
   // 共用
@@ -81,13 +102,87 @@ const MENU_DEFAULTS = {
   motion: true,
 };
 
+// ---------------------------------------------------------------- frost 参数
+
+/**
+ * 底色不透明度。
+ *
+ * 菜单文字是上游写死的 text-white，改不了；背后是会动的 3D 场景，最坏情况
+ * 接近纯白。所以底色必须自己把亮度压下去，不能指望背景帮忙。
+ *
+ * #0c0c0e 按 .90 压在纯白上得到 #242426（Y=0.018），白字 15.4:1 —— 这是
+ * 还没叠彩晕的"预算上限"。剩下的 15.4 → 7 之间的空间全部交给彩晕去花。
+ * 选 .90 而不是刚好够用的 .86：.86 的等效底色是 46 灰，整屏灰蒙蒙，彩晕浮
+ * 在灰雾上显脏；.90 压到 36 灰，同样的晕色看着更纯。
+ */
+const FROST_ALPHA = 0.90;
+
+/** 四角彩晕：位置固定（对应参考站 MeshGradient 的 shape="corners"）。 */
+const FROST_CORNERS = [[0, 0], [1, 0], [0, 1], [1, 1]];
+
+/**
+ * 权重全部拉满到 1.0。
+ *
+ * 上一版是 .38/.36/.42/.38，理由是"怕压过 7:1"。那是把预算算错了 —— 详见
+ * 下面的色度天花板。晕色本身已经取在天花板上（叠完网格和颗粒刚好 7:1），
+ * 再乘一个 <1 的权重只是把它往底色方向稀释，白白丢掉彩度。
+ */
+const FROST_WEIGHTS = [1, 1, 1, 1];
+
+/**
+ * 晕色是怎么选出来的：暗底上的色度天花板。
+ *
+ * 白字 7:1 → 底色相对亮度 Y ≤ 1.05/7 − 0.05 = 0.10。在这条线以下逐 OKLCh
+ * 色相扫 sRGB 色域内的最大彩度（判据用的就是 worstCaseContrast 本身，
+ * 网格 + 颗粒三态全算上），结果差了近 4 倍：
+ *
+ *   色相    0     20     40     60     80    100    120    140    160
+ *   maxC  .199   .195   .151   .110   .095   .095   .108   .145   .102
+ *   色相  180    200    220    240    260    280    300    320    340
+ *   maxC  .083   .077   .083   .106   .192   .295   .267   .238   .213
+ *
+ * 结论：暗底上**紫红半圈能上色，青绿橙半圈上不了色**。上一版四色
+ * #b8730a(h75) / #c33a22(h30) / #4a2ec4(h287) / #0d8598(h211) 里，琥珀和
+ * 青正好压在天花板最低的两段（.095 / .077），红和紫又只用掉天花板的 42%
+ * 和 41% —— 两头都没占着便宜，混出来的观感就是"泥"。
+ *
+ * 现在这四色全部取在各自色相的天花板上，并且只在紫红半圈里走：
+ *
+ *   左上 #0055ba  h≈258 蓝      右上 #8000e0  h≈300 紫
+ *   左下 #a9007b  h≈345 玫      右下 #b4003b  h≈15  红
+ *
+ * 顺时针读下来是一段连续的色相旅程（蓝→紫→玫→红），四角互不打架；
+ * 对角线上（蓝↔玫、紫↔红）的过渡色也都还在紫红区里，不会混出灰。
+ */
+
+/**
+ * 细网格：给大面积彩晕一个尺度参照。step 对齐上游 nav 的 gap-64。
+ *
+ * 线色从白改成黑，这是实测逼出来的。白线要占亮度预算：叠上去之后为了守住
+ * 7:1，彩晕得整体退一档，实测吃掉约 10% 的平均彩度；而在 alpha=.045 这种
+ * 能守住对比度的强度下，白线在彩色背景上几乎看不见 —— 纯亏本。
+ *
+ * 黑线反过来：白字最坏点落在**线与线之间**（那里没有网格），所以暗网格
+ * 完全不占亮度预算，最坏对比度和"根本没有网格"一模一样，可以放心加到
+ * alpha=.14 这种真的看得见的强度。（worstCaseContrast 已改成线上/线间
+ * 两态取更坏，不然会把暗网格的成绩算高。）
+ *
+ * .14 是目视挑的：.22 时格子重得像棋盘，.14 刚好是"知道有格子在但不抢戏"。
+ */
+const FROST_GRID = { color: '#000000', alpha: 0.14, step: 64 };
+
+/** 序号（小上标）与文字下划线的白色不透明度。 */
+const FROST_NUM = 0.46;
+const FROST_RULE = [0.34, 0.08];
+
+/** 文字量度上限（px）。平板通栏时不收着，文字会贴着左边跑一长条。 */
+const MENU_MEASURE = 560;
+
 // ------------------------------------------------------------------ ink 参数
 
 /**
  * 墨底三段不透明度：顶 90% / 中 94% / 底 97%。
- * 不做成纯不透明，是因为 backdrop-filter 的模糊只有在底下透得出东西时才有
- * 意义 —— 全实心的话磨砂层等于白开。顶部留 10% 透光量，正好让打开菜单时
- * 背后那次 setIceTransition(1) 的结霜过渡还能隐约看见，动作有了去处。
+ * ink 是上一版的默认预设，现在降级为可选项，参数原样保留。
  */
 const INK_STOPS = [0.9, 0.94, 0.97];
 const INK_BLUR = '26px';
@@ -100,31 +195,11 @@ const INK_NUM = 0.42;
 /** 打开时每条导航从下方抬起的距离（px）。 */
 const INK_LIFT = 14;
 
-/**
- * 文字量度上限（px）。菜单一直用到 1024px（lg 断点）才换成桌面导航，
- * 平板通栏时如果不收着，标题贴左边、序号贴右边，中间空出一大片，读起来
- * 眼睛要横跳。发丝线仍然通栏 —— 只有文字受这个约束。
- */
+/** ink 的文字量度上限（px）。比 frost 窄一点，因为它是通栏发丝线的版式。 */
 const INK_MEASURE = 520;
 
-/**
- * 墨色对白字的对比度下限。7:1 = WCAG AAA。
- * 这里**不达标直接报错**，不像别的预设只是告警 —— 菜单文字颜色是上游写死的
- * text-white，配一个压不住白字的墨色等于把导航做没了，没有"这是审美选择"
- * 的余地。
- */
-const INK_MIN = 7;
-
-/**
- * 细噪点：内联 SVG feTurbulence，不新增文件、不发请求。
- * stitchTiles='stitch' 让 140×140 的图块能无缝平铺，否则每块边缘会有接缝。
- * 它的作用是打散大面积渐变里的色带（banding）—— 深蓝渐变在 6bit 面板上
- * 特别容易出环。
- */
-const NOISE_URI = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' "
-  + "width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' "
-  + "baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E"
-  + "%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E\")";
+/** 社交链接的不透明度，上游是 .61（太暗），提到这个值。 */
+const SOCIAL_ALPHA = 0.74;
 
 /** 三个光斑的位置 / 尺寸 / 强度。抽出来是为了让 keyframes 和静态值同源。 */
 const BLOBS = [
@@ -140,21 +215,7 @@ const DRIFT = [
   ['6% 48%', '94% 50%', '70% 98%'],
 ];
 
-/**
- * frost 预设的底色不透明度。
- * 为什么不是更通透的 .62：菜单背后是 3D 场景，最坏情况是整片白（页面顶部
- * 那段确实接近白）。#062969 以 .62 压在纯白上等效 #657aa2，白字对比度 4.32:1，
- * 差一点点够不到 WCAG AA 的 4.5。提到 .72 等效 #4a638f，约 5.8:1，安全。
- */
-const FROST_ALPHA = 0.72;
-
-/** 社交链接的不透明度，上游是 .61（太暗），提到这个值。 */
-const SOCIAL_ALPHA = 0.74;
-
 const round1 = (n) => Math.round(n * 10) / 10;
-
-/** 0.13 → ".13"。CSS 里省掉前导 0，和 color.js 里 rgba() 的写法保持一致。 */
-const dec = (n) => String(n).replace(/^0\./, '.');
 
 /** 单个颜色的校验，用法和 checkColorList 一样：出错时回退到默认值。 */
 function checkHex(v, key, errors) {
@@ -163,19 +224,6 @@ function checkHex(v, key, errors) {
     return MENU_DEFAULTS[key];
   }
   return v.trim().toLowerCase();
-}
-
-/**
- * 各预设「最亮处」的等效底色 —— 对比度体检要按最坏情况算，不是按平均。
- *   aurora / gradient  不透明，最坏就是 colors 里最浅的那个
- *   frost              半透明，最坏是背后的 3D 场景整片白
- * 注意 aurora 的光斑是加色叠上去的，理论上会再提亮一点；但光斑本身
- * 不透明度只有 .3 左右且大面积是零透明，忽略这点误差比虚报安全。
- */
-function worstBackdrop(mode, colors, ink) {
-  if (mode === 'ink') return over(ink, '#ffffff', INK_STOPS[0]);
-  if (mode === 'frost') return over(colors[2], '#ffffff', FROST_ALPHA);
-  return colors.reduce((a, c) => (contrast('#ffffff', c) < contrast('#ffffff', a) ? c : a));
 }
 
 function checkColorList(list, key, want, errors) {
@@ -194,7 +242,25 @@ function checkColorList(list, key, want, errors) {
   return list.map((c) => c.trim().toLowerCase());
 }
 
-/** 底色：160° 线性渐变，三段。三套预设共用。 */
+/** frost 的四角彩晕，按 config 里的颜色顺序配上固定的角位与权重。 */
+function frostBlooms(bloom) {
+  return bloom.map((color, i) => ({
+    color, at: FROST_CORNERS[i], weight: FROST_WEIGHTS[i],
+  }));
+}
+
+/**
+ * 各预设「最亮处」的等效底色 —— 对比度体检要按最坏情况算，不是按平均。
+ *   aurora / gradient  不透明，最坏就是 colors 里最浅的那个
+ *   ink                半透明，最坏是最透的那一段压在纯白场景上
+ *   frost              半透明 + 彩晕 + 网格，交给 grain.js 的九点采样
+ */
+function worstBackdrop(mode, colors, ink) {
+  if (mode === 'ink') return over(ink, '#ffffff', INK_STOPS[0]);
+  return colors.reduce((a, c) => (contrast('#ffffff', c) < contrast('#ffffff', a) ? c : a));
+}
+
+/** 底色：160° 线性渐变，三段。aurora / gradient 共用。 */
 function baseGradient(colors) {
   return `linear-gradient(160deg,${colors[0]} 0%,${colors[1]} 55%,${colors[2]} 100%)`;
 }
@@ -205,7 +271,7 @@ function auroraLayers(glow) {
 }
 
 /**
- * ink 预设的全部规则。
+ * frost 预设的全部规则。
  *
  * 选择器为什么按位置选（>div:nth-child(2)）
  * ------------------------------------------
@@ -214,13 +280,116 @@ function auroraLayers(glow) {
  * 选会跟工具类的语义绑死（比如哪天 gap-64 改成 gap-48 就失配），按位置选
  * 反而稳 —— 结构变了会立刻在截图里露馅，不会静默错位。
  *
- * 错峰为什么不自己写
- * -------------------
+ * 下划线为什么用 background-size 做
+ * ---------------------------------
  * 上游给这四条链接挂的是 `transition-all duration-300`，打开时再各自加上
- * `delay-200 / delay-250 / delay-300 / delay-350`（实测这四个类在
- * entry.BEbxiOYI.css 里都有定义）。`transition-all` 意味着我们加的 transform
- * 会跟着同一条 transition 和同一份 delay 走 —— 直接白捡一套已经和不透明度
- * 对齐的错峰。自己再写一套 transition-delay 只会跟它打架。
+ * `delay-200 / delay-250 / delay-300 / delay-350`。background-size 是可过渡
+ * 属性，`transition-all` 会带上它 —— 于是下划线从 0 画到 100% 这件事，直接
+ * 白捡了一套已经和不透明度对齐的错峰，不用另写 transition-delay 去跟它打架。
+ *
+ * 垂直居中为什么要给第一个空 div 一个高度
+ * ---------------------------------------
+ * 上游是 `flex flex-col justify-between pb-24`，三个子元素分别是空 div、
+ * 导航、社交行。空 div 高 0，社交行占了底部一块，于是"两端对齐"算出来的
+ * 导航中心比视口中心高出约 22px，下面空一大片。给空 div 一个等于底部占位
+ * （社交行 + pb-24）的高度，再让导航吃掉两边的 auto margin，中心就正好落在
+ * 视口中线上。
+ */
+function frostRules(sel, open, o) {
+  const {
+    ink, bloom, index, grid, motion,
+  } = o;
+  const nav = `${sel}>div:nth-child(2)`;
+  const link = `${nav}>a`;
+  const social = `${sel}>div:nth-child(3)`;
+  const r = [];
+
+  const blooms = frostBlooms(bloom);
+  const mesh = meshLayers(blooms);
+  const g = grid ? gridLayers(FROST_GRID) : { images: [], sizes: [] };
+  const images = [...g.images, ...mesh];
+  const sizes = [...g.sizes, ...mesh.map(() => '100% 100%')];
+  const repeats = [...g.images.map(() => 'repeat'), ...mesh.map(() => 'no-repeat')];
+
+  // 底：纯色底 + 彩晕 + 网格。--ns-menu-gut 是"量度留白"，导航和社交行共用
+  // 一个值，这样两处的左右边界永远对齐。
+  r.push(`${sel}{isolation:isolate;`
+    + `--ns-menu-gut:max(24px,(100% - ${MENU_MEASURE}px)/2);`
+    + '--ns-menu-foot:46px;'
+    + `background-color:${rgba(ink, FROST_ALPHA)};`
+    + `background-image:${images.join(',')};`
+    + `background-size:${sizes.join(',')};`
+    + `background-repeat:${repeats.join(',')}}`);
+
+  // 上游写的是 h-screen（100vh）。移动端浏览器的地址栏收起前 100vh 比可视区
+  // 高一截，底部那行社交链接会被切掉。dvh 支持就用 dvh。
+  r.push(`@supports(height:100dvh){${sel}{height:100dvh}}`);
+
+  // frost 故意不用 backdrop-filter。
+  //
+  // 上一版挂了 blur(18px) saturate(150%)，理由是"alpha=.86 还剩 14% 透光，
+  // 模糊有事可做"。这一版彩晕权重拉满到 1.0、SIZE 放到 1.35，整块面板已经
+  // 被自己的彩晕铺满，背后那 10% 透光量在视觉上完全被盖掉 —— 模糊层做的功
+  // 一分都看不见，却要求浏览器每帧把背后的 3D 画布再采样模糊一次。低端
+  // Android 上这是纯烧 GPU。所以直接不要。
+  //
+  // 顺带好处：不用再写 `@supports not (backdrop-filter)` 的回退分支了，
+  // 因为现在所有环境看到的都是同一个结果。
+  //
+  // ink 预设保留 backdrop-filter，那边的层次结构不一样（见 buildInk）。
+
+  // 顶部空 div 撑出和底部等高的占位，导航吃掉剩余空间的一半 → 真正居中。
+  r.push(`${sel}>div:first-child{flex:none;height:var(--ns-menu-foot)}`);
+
+  // 导航容器：拆掉 items-center 的居中和 64px 等距，改成左对齐的索引列。
+  r.push(`${nav}{margin-block:auto;align-items:flex-start;`
+    + 'gap:clamp(24px,4.4vh,38px);'
+    + 'padding-inline:var(--ns-menu-gut)'
+    + `${index ? ';counter-reset:ns-menu' : ''}}`);
+
+  // 链接本体。inline-block 让下划线只有文字那么宽（贴着字，不通栏）。
+  const linkDecl = [
+    'display:inline-block', 'position:relative',
+    'font-size:clamp(32px,8.2vw,44px)', 'line-height:1.06',
+    'background-repeat:no-repeat', 'background-position:0 100%',
+    'background-size:0 1px',
+    `background-image:linear-gradient(90deg,${rgba('#ffffff', FROST_RULE[0])} 0%,`
+      + `${rgba('#ffffff', FROST_RULE[1])} 100%)`,
+    'padding-bottom:.14em',
+  ];
+  if (index) linkDecl.push('counter-increment:ns-menu');
+  r.push(`${link}{${linkDecl.join(';')}}`);
+
+  if (index) {
+    // 序号放在标签正上方，和标签同一条左边界 —— 不再甩到屏幕最右边留死区。
+    // decimal-leading-zero 给出 01/02/03…；序号是装饰性读数，不进无障碍树
+    // 也没关系（::before 的 content 本来就不是可选中文本）。
+    r.push(`${link}::before{content:counter(ns-menu,decimal-leading-zero);`
+      + 'display:block;font-size:11px;line-height:1;letter-spacing:.26em;'
+      + `margin-bottom:.7em;opacity:${dec(FROST_NUM)};`
+      + 'font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}');
+  }
+
+  if (motion) {
+    // 打开时下划线从 0 画到满宽，走的是上游自己的 delay-200/250/300/350。
+    r.push(`${open}>div:nth-child(2)>a{background-size:100% 1px}`);
+    r.push('@media(prefers-reduced-motion:reduce){'
+      + `${link},${open}>div:nth-child(2)>a{background-size:100% 1px;transition:none}}`);
+  } else {
+    r.push(`${link}{background-size:100% 1px}`);
+  }
+
+  // 社交行：左右缩到和导航文字同一条边界上，顶上补一条只到量度宽度的细线。
+  r.push(`${social}{padding-left:var(--ns-menu-gut);padding-right:var(--ns-menu-gut)}`);
+
+  // 焦点圈往里收一点，免得顶到彩晕最亮的角上。
+  r.push(`${link}:focus-visible{outline-offset:2px;border-radius:2px}`);
+
+  return r;
+}
+
+/**
+ * ink 预设的全部规则（上一版的默认，现在是可选项，原样保留）。
  *
  * @param {string} sel   .mobile-menu.mobile-menu
  * @param {string} open  加了 .opacity-100 的同一个选择器
@@ -233,8 +402,6 @@ function inkRules(sel, open, o) {
   const line = `1px solid ${rgba('#ffffff', INK_LINE)}`;
   const r = [];
 
-  // 底：竖向三段墨色。--ns-menu-gut 是"量度留白"，导航和社交行共用一个值，
-  // 这样两处的左右边界永远对齐。
   r.push(`${sel}{isolation:isolate;`
     + `--ns-menu-gut:max(20px,(100% - ${INK_MEASURE}px)/2);`
     + `background-image:linear-gradient(180deg,`
@@ -242,20 +409,14 @@ function inkRules(sel, open, o) {
     + `${rgba(ink, INK_STOPS[1])} 58%,`
     + `${rgba(ink, INK_STOPS[2])} 100%)}`);
 
-  // 上游写的是 h-screen（100vh）。移动端浏览器的地址栏收起前 100vh 比可视区
-  // 高一截，底部那行社交链接会被切掉。dvh 支持就用 dvh。
   r.push(`@supports(height:100dvh){${sel}{height:100dvh}}`);
 
-  // 磨砂只挂在打开态：菜单关着的时候不留任何持续合成开销。
   r.push(`${open}{-webkit-backdrop-filter:blur(${INK_BLUR}) saturate(${INK_SATURATE});`
     + `backdrop-filter:blur(${INK_BLUR}) saturate(${INK_SATURATE})}`);
 
-  // 不支持磨砂（老 Firefox、关了硬件加速的环境）就补一层实底。
-  // 没有这条的话透出来的是 3D 场景原色，白字随时可能糊掉。
   r.push('@supports not ((-webkit-backdrop-filter:blur(1px)) or (backdrop-filter:blur(1px))){'
     + `${sel}{background-color:${ink}}}`);
 
-  // 导航容器：拆掉 gap-64 和 items-center，改成通栏索引表。
   r.push(`${nav}{gap:0;align-self:stretch;align-items:stretch`
     + `${index ? ';counter-reset:ns-menu' : ''}}`);
 
@@ -269,8 +430,6 @@ function inkRules(sel, open, o) {
   r.push(`${link}:last-child{border-bottom:${line}}`);
 
   if (index) {
-    // decimal-leading-zero 给出 01/02/03…；序号是装饰性的读数，不进无障碍
-    // 树也没关系（::after 的 content 本来就不是可选中文本）。
     r.push(`${link}::after{content:counter(ns-menu,decimal-leading-zero);`
       + 'font-size:11px;line-height:1;letter-spacing:.24em;margin-right:-.24em;'
       + `opacity:${dec(INK_NUM)};`
@@ -279,17 +438,12 @@ function inkRules(sel, open, o) {
 
   if (motion) {
     r.push(`${open}>div:nth-child(2)>a{transform:none}`);
-    // 系统级「减少动态效果」优先级高于配置项：位移直接不要，不透明度的
-    // 淡入是上游的、留着（那个不算前庭刺激）。
     r.push(`@media(prefers-reduced-motion:reduce){${link}{transform:none}}`);
   }
 
-  // 社交行：接上最后一条发丝线，左右缩到和导航文字同一条边界上。
   r.push(`${social}{border-top:${line};padding-top:20px;`
     + 'padding-left:var(--ns-menu-gut);padding-right:var(--ns-menu-gut)}');
 
-  // 序号是右对齐的，把导航链接的 :focus-visible 描边往里收 —— 默认那圈
-  // outline-offset:3px 会顶到发丝线外面去，看着像错位。
   r.push(`${link}:focus-visible{outline-offset:-6px;border-radius:0}`);
 
   return r;
@@ -320,38 +474,38 @@ function buildMenuCss(site) {
 
   const motion = m.motion !== false;
   const noise = m.noise !== false;
-  // ink 只用 ink + index 两个键，别的预设只用 colors + glow。各校验各的，
-  // 免得配了 ink 却因为没写 glow 而报一堆用不上的错。
+  // frost / ink 只用 ink + index（frost 再加 bloom + grid），aurora / gradient
+  // 只用 colors + glow。各校验各的，免得配了 frost 却因为没写 glow 报一堆
+  // 用不上的错。
+  const isFrost = mode === 'frost';
   const isInk = mode === 'ink';
-  const ink = isInk ? checkHex(m.ink, 'ink', errors) : MENU_DEFAULTS.ink;
-  if (isInk && typeof m.index !== 'boolean') {
+  const dark = isFrost || isInk;
+
+  const ink = dark ? checkHex(m.ink, 'ink', errors) : MENU_DEFAULTS.ink;
+  if (dark && typeof m.index !== 'boolean') {
     errors.push(`site.menu.index: 需要 true / false，实际拿到 ${JSON.stringify(m.index)}`);
   }
   const index = m.index !== false;
-  const colors = isInk ? MENU_DEFAULTS.colors : checkColorList(m.colors, 'colors', 3, errors);
-  const glow = isInk ? MENU_DEFAULTS.glow : checkColorList(m.glow, 'glow', 3, errors);
+  const grid = m.grid !== false;
+  const bloom = isFrost
+    ? checkColorList(m.bloom, 'bloom', 4, errors)
+    : MENU_DEFAULTS.bloom;
+  const backdrop = isFrost ? checkHex(m.backdrop, 'backdrop', errors) : MENU_DEFAULTS.backdrop;
+  const colors = dark ? MENU_DEFAULTS.colors : checkColorList(m.colors, 'colors', 3, errors);
+  const glow = dark ? MENU_DEFAULTS.glow : checkColorList(m.glow, 'glow', 3, errors);
 
   const rules = [];
   const sel = '.mobile-menu.mobile-menu';
   // 打开状态由 Vue 加上 `opacity-100`。把动画和 backdrop-filter 挂在这个类上，
   // 菜单关着的时候就不会有任何持续开销 —— 移动端这点很值。
   const open = `${sel}.opacity-100`;
-  let linkExtra = '';
 
-  if (isInk) {
+  if (isFrost) {
+    rules.push(...frostRules(sel, open, {
+      ink, bloom, index, grid, motion,
+    }));
+  } else if (isInk) {
     rules.push(...inkRules(sel, open, { ink, index, motion }));
-  } else if (mode === 'frost') {
-    // 半透明深色 + 背景模糊：3D 场景隐约透出来，但文字有了稳定的底。
-    // 不透明度取 FROST_ALPHA 而不是更通透的 .62 —— 见下面的对比度计算：
-    // .62 在纯白场景下只有 4.32:1，压不住 AA 线。
-    rules.push(`${sel}{isolation:isolate;`
-      + `background-color:${rgba(colors[2], FROST_ALPHA)};`
-      + `background-image:linear-gradient(170deg,${rgba(colors[0], 0.5)} 0%,`
-      + `${rgba(colors[1], 0.24)} 48%,${rgba(colors[2], 0.5)} 100%)}`);
-    rules.push(`${open}{-webkit-backdrop-filter:blur(28px) saturate(150%);`
-      + 'backdrop-filter:blur(28px) saturate(150%)}');
-    // 透出来的场景亮度不可控，给文字补一层阴影兜底（不计入 WCAG，只是好看）。
-    linkExtra = `;text-shadow:0 1px 18px ${rgba(colors[2], 0.75)}`;
   } else if (mode === 'gradient') {
     rules.push(`${sel}{isolation:isolate;background-image:${baseGradient(colors)}}`);
   } else {
@@ -371,17 +525,21 @@ function buildMenuCss(site) {
     }
   }
 
-  if (noise && mode !== 'frost' && !isInk) {
-    // frost 和 ink 都已经有背景模糊在打散色带了，再叠噪点纯属浪费一层合成。
-    rules.push(`${sel}::after{content:"";position:absolute;inset:0;z-index:-1;`
-      + 'pointer-events:none;opacity:.055;mix-blend-mode:overlay;'
-      + `background-image:${NOISE_URI};background-size:140px 140px}`);
+  // 颗粒层。frost 用它做磨砂质感（这是这一版的重点，不再是"打散色带"的
+  // 附属品）；aurora / gradient 是不透明的大面积渐变，叠一层同样能压色带。
+  // ink 保持上一版的行为：它已经有 26px 的背景模糊在打散色带了，不再叠。
+  if (noise && !isInk) {
+    rules.push(isFrost
+      ? grainRule(sel, { surface: 'dark' })
+      // aurora / gradient 只是要压住渐变色带，不需要对齐参考站的振幅，
+      // 用中灰噪点 + overlay 就够（它俩的底是不透明的，不怕均值漂移）。
+      : grainRule(sel, { alpha: 0.42, slope: 2, center: 0.5, blend: 'overlay' }));
   }
 
   // 可读性微调。
   // 导航链接的 opacity 是逐条错峰动画（delay-200/250/300/350），绝对不能碰；
   // 社交行的错峰在父元素上，子元素的 opacity-61 是静态值，可以安全提亮。
-  rules.push(`${sel} a{letter-spacing:.04em${linkExtra}}`);
+  rules.push(`${sel} a{letter-spacing:.04em}`);
   rules.push(`${sel} a.opacity-61{opacity:${dec(SOCIAL_ALPHA)}}`);
 
   // 键盘可达性：上游整个站里 focus-visible 出现 0 次，Tab 走到菜单里没有任何
@@ -390,19 +548,39 @@ function buildMenuCss(site) {
     + 'outline-offset:3px;border-radius:3px}');
 
   // 对比度体检：菜单文字是上游写死的 text-white，改不了，所以底色必须够深。
-  const eff = worstBackdrop(mode, colors, ink);
-  const ratio = round1(contrast('#ffffff', eff));
-  // ink 是我们自己定的默认预设，压不住白字就是坏了，直接拦；其它预设是
-  // 用户自己配的颜色，只提示不拦截 —— 那是审美判断，不是正确性问题。
-  if (isInk && ratio < INK_MIN) {
-    errors.push(`site.menu.ink: ${ink} 在最透的那一段（${dec(INK_STOPS[0])} 不透明度，`
-      + `等效底色 ${eff}）对白字只有 ${ratio}:1，低于要求的 ${INK_MIN}:1。把墨色调深。`);
+  let ratio;
+  let eff;
+  if (isFrost) {
+    const w = worstCaseContrast({
+      base: ink,
+      alpha: FROST_ALPHA,
+      blooms: frostBlooms(bloom),
+      grid: grid ? { color: FROST_GRID.color, alpha: FROST_GRID.alpha } : null,
+      grain: noise ? 'dark' : null,
+      backdrop,
+    });
+    ratio = w.ratio;
+    eff = w.effective;
+  } else {
+    eff = worstBackdrop(mode, colors, ink);
+    ratio = round1(contrast('#ffffff', eff));
   }
-  if (!isInk && ratio < 4.5) {
+
+  // frost / ink 是我们自己定的预设，压不住白字就是坏了，直接拦；其它预设是
+  // 用户自己配的颜色，只提示不拦截 —— 那是审美判断，不是正确性问题。
+  if (isFrost && ratio < MENU_MIN) {
+    errors.push(`site.menu：frost 叠完四角彩晕和网格之后，白字在最坏背景`
+      + `（${backdrop}）上只有 ${ratio}:1（等效底色 ${eff}），低于要求的 ${MENU_MIN}:1。`
+      + '把 bloom 换深一些，或者把 ink 调深。');
+  }
+  if (isInk && ratio < MENU_MIN) {
+    errors.push(`site.menu.ink: ${ink} 在最透的那一段（${dec(INK_STOPS[0])} 不透明度，`
+      + `等效底色 ${eff}）对白字只有 ${ratio}:1，低于要求的 ${MENU_MIN}:1。把墨色调深。`);
+  }
+  if (!dark && ratio < 4.5) {
     warnings.push(`site.menu：白色导航文字在最亮处的对比度只有 ${ratio}:1（等效底色 ${eff}），`
       + '低于 WCAG AA 的 4.5:1。菜单文字颜色是上游写死的 text-white，改不了，'
-      + '请把 colors 换深一些'
-      + (mode === 'frost' ? '，或改用 aurora / gradient 这类不透明预设。' : '。'));
+      + '请把 colors 换深一些。');
   }
   // 社交行是 74% 白，单独再算一次（AA 对非正文的下限按 3:1 看）。
   const social = round1(contrast(over('#ffffff', eff, SOCIAL_ALPHA), eff));
@@ -418,12 +596,16 @@ function buildMenuCss(site) {
 module.exports = {
   buildMenuCss,
   worstBackdrop,
+  frostBlooms,
   MENU_MODES,
   MENU_DEFAULTS,
-  NOISE_URI,
+  MENU_MIN,
+  MENU_MEASURE,
   FROST_ALPHA,
+  FROST_CORNERS,
+  FROST_WEIGHTS,
+  FROST_GRID,
   INK_STOPS,
-  INK_MIN,
   INK_LIFT,
   INK_MEASURE,
 };

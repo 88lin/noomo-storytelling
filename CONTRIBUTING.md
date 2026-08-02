@@ -22,7 +22,7 @@ npm run fetch-src   # 首次必跑：从快照仓库固定提交取回 src/（70
 npm run build       # 构建到 dist/
 npm run serve       # 本地预览 dist/，默认端口 3000
 npm run dev         # 边改边看：监听 config/ 与 tools/，自动重建 + 浏览器刷新
-npm test            # 248 项单元测试
+npm test            # 279 项单元测试
 npm run test:e2e    # 可选：真浏览器验收
 ```
 
@@ -36,7 +36,7 @@ npm run test:e2e    # 可选：真浏览器验收
 | 改文案、品牌、配色、滚动节奏 | `config/` 下三个文件 | 一般不需要动 `tools/` |
 | 加新的 DSL 记法 | `tools/markup.js` | 必须同时补 `tools/test/markup.test.js` |
 | 加新的锚点替换 | `tools/anchors.js` | 见下方「锚点的唯一性」 |
-| 改构建流程 | `tools/build.js` | 跑一遍 `npm test`，确认 248 项全过 |
+| 改构建流程 | `tools/build.js` | 跑一遍 `npm test`，确认 279 项全过 |
 | 改加载页 / 菜单 / 水晶 | `tools/preloader.js`、`tools/menu.js`、`tools/crystals.js` | 三者都有对应测试文件 |
 
 **请不要提交 `src/` 下的任何文件。** 它已在 `.gitignore` 里，
@@ -59,7 +59,7 @@ npm run test:e2e    # 可选：真浏览器验收
 
 1. Fork 本仓库
 2. 建分支：`git checkout -b feat/你的功能名`
-3. 改代码，**跑一遍 `npm test`**，确认 248 项全过
+3. 改代码，**跑一遍 `npm test`**，确认 279 项全过
 4. 提交：`git commit -m "描述你的修改"`
 5. 推送：`git push origin feat/你的功能名`
 6. 开 Pull Request，说明改了什么、为什么、怎么验证的

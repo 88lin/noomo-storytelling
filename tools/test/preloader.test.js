@@ -13,8 +13,9 @@ const fs = require('fs');
 const { test, eq, ok, setFile } = require('./harness');
 const { SRC } = require('../paths');
 const {
-  buildPreloader, nodes, toHtml, toVnode, solveFaint,
+  buildPreloader, nodes, toHtml, toVnode, solveFaint, worstPaper,
   PRELOADER_DEFAULTS, PRELOADER_CLASSES, STYLES, SCOPE, PAPER_INK_MIN, PAD, CUT,
+  FAINT_TEXT_MIN, FAINT_NUM_MIN, FEATHER, WASH_DARK,
 } = require('../preloader');
 const { contrast, over } = require('../color');
 const { normalizeSite } = require('../assets');
@@ -176,14 +177,25 @@ test('preloader: progress 的三个背景色 + 强调色 + 两个光斑色都进
 });
 
 test('preloader: 覆盖上游浅紫底用 .preloader.preloader，特异度打平靠顺序取胜', () => {
-  ok(base.css.includes('.preloader.preloader{background:'), base.css.slice(0, 200));
+  // 上游是 `.preloader[data-v-724e2fc4]{background:linear-gradient(45deg,#cebdf8,#e2dbf8)}`，
+  // (0,1,1)+属性 = (0,2,1)。重复类名把我们抬到 (0,2,1) 打平，再靠 CSS 出现顺序
+  // 取胜。注意这里必须写 background-color + background-image 两条，不能写
+  // 简写 background —— 简写会把上游 gradient 一并清成 none 我们也不吃亏，
+  // 但拆开写才能让纸色和色偏分层，颗粒层再叠上去时不会互相覆盖。
+  ok(base.css.includes('.preloader.preloader{background-color:'), base.css.slice(0, 240));
   ok(!base.css.includes(SCOPE), '主题层不该把 scope id 硬编码进去');
 });
 
 // ---------------------------------------------------- 4b. editorial 专属
 test('preloader: 默认走 editorial，纸色铺底、墨色排字，深蓝那套一个都不进 CSS', () => {
   eq(base.style, 'editorial');
-  ok(base.css.includes('.preloader.preloader{background:#f2ede3}'), base.css.slice(0, 160));
+  // 纸色铺底 + 两条 radial 色偏（左上偏亮、右下偏暗），模拟纸张在光下的两极。
+  // 纯平涂的一块 #f2ede3 在大屏上会显得是「一块塑料」，两极差 ~5% 就够了。
+  ok(base.css.includes('.preloader.preloader{background-color:#f2ede3'), base.css.slice(0, 240));
+  eq((base.css.match(/radial-gradient\(\d+% \d+% at /g) || []).length, 2);
+  // 颗粒层用 z-index:-1 垫在文字下面，父级必须 isolation:isolate 起层叠上下文，
+  // 否则 -1 会穿到 .preloader 的祖先后面去，整块纸都看不见。
+  ok(/\.preloader\.preloader\{[^}]*isolation:isolate/.test(base.css), '纸面没起层叠上下文');
   // progress 的三个蓝和两团光斑不该出现在 editorial 的产物里 —— 两套样式
   // 共用一份配置对象，最容易犯的错就是把不属于当前样式的色也写进去。
   for (const c of ['#00276e', '#143a8a', '#062969', '#88aeff', '#4edbef', '#6248a4']) {
@@ -199,11 +211,26 @@ test('preloader: editorial 的数字用衬线斜体，百分号退回无衬线�
   ok(/\.ns-pre-pct\{[^}]*font-style:normal/.test(base.css), 'ns-pre-pct 没退回正体');
 });
 
-test('preloader: --ns-pre-p 恰好驱动两处（字形分界点 + 发丝线）', () => {
-  // 分界点算式收在 --ns-pre-cut 里，渐变的两个断点都读它，所以
-  // --ns-pre-p 只出现在「算分界点」和「发丝线 scaleX」两个地方。
+test('preloader: editorial 里 --ns-pre-p 只驱动字形分界点这一处', () => {
+  // 分界点算式收在 --ns-pre-cut 里，渐变的两个断点都读它。
   eq(countOf(base.css, '--ns-pre-cut:'), 1, base.css);
   eq(countOf(base.css, 'var(--ns-pre-cut)'), 2, base.css);
+  // 发丝线不再是第二个进度条：它是版心宽（680px），数字是内容宽（两位数约
+  // 408px），同一个 p 画出来的两条分界在 86% 处差 244px，读起来像两个各说
+  // 各话的读数。线降级成静态地平线之后，--ns-pre-p 在 editorial 的 CSS 里
+  // 只剩 --ns-pre-cut 那一处引用。
+  eq(countOf(base.css, 'var(--ns-pre-p'), countOf(base.css.slice(
+    base.css.indexOf('--ns-pre-cut:'),
+    base.css.indexOf(';', base.css.indexOf('--ns-pre-cut:')),
+  ), 'var(--ns-pre-p'), 'editorial 里除了分界点算式，别处不该再读 --ns-pre-p');
+  ok(!/\.ns-pre-bar\s+i\{/.test(base.css), 'editorial 不该再有发丝线填充条');
+  const ssr = base.anchors.find((a) => a.key === 'preloader.ssr').replace;
+  ok(!ssr.includes('<i '), `editorial 的 SSR 标记里不该有空 <i>：${ssr}`);
+  // progress 预设没有大数字，那条填充是唯一读数，必须留着
+  const prog = buildPreloader(site({ style: 'progress' }));
+  ok(/\.ns-pre-bar i\{[^}]*scaleX\(var\(--ns-pre-p/.test(prog.css), 'progress 的填充条丢了');
+  ok(prog.anchors.find((a) => a.key === 'preloader.ssr').replace.includes('<i '),
+    'progress 的 SSR 标记里应当有 <i>');
   // 字形渐变必须包在 @supports 里：color:transparent 一旦在不支持
   // background-clip:text 的浏览器上生效，整个数字会直接消失。
   const i = base.css.indexOf('color:transparent');
@@ -280,25 +307,80 @@ test('preloader: 白色标识在象牙纸上会被压成纯黑，深底下不动
   eq(buildPreloader(site({ markInvert: 'sometimes' })).errors.length, 1);
 });
 
-test('preloader: 淡墨是解出来的，纸色变了它跟着变，且始终 ≥3:1', () => {
+test('preloader: 淡墨是解出来的，纸色变了它跟着变，且刚好卡在目标线上', () => {
   for (const paper of ['#f2ede3', '#ffffff', '#e6e0d2', '#d8d4cc']) {
-    const f = solveFaint('#14120f', paper);
-    ok(contrast(f, paper) >= 3, `${paper} 上解出的 ${f} 只有 ${contrast(f, paper).toFixed(2)}:1`);
-    // 「够看得清的前提下最淡的那一档」：往回退一个百分点必须掉到 3:1 以下，
-    // 否则说明解得偏保守、白白把字压深了。
-    for (let a = 0.2; a <= 0.96; a += 0.01) {
-      if (over('#14120f', paper, a) === f) {
-        if (a > 0.2001) {
-          const prev = over('#14120f', paper, a - 0.01);
-          ok(contrast(prev, paper) < 3, `${paper} 上还能更淡：${prev}`);
+    for (const target of [FAINT_NUM_MIN, FAINT_TEXT_MIN]) {
+      const f = solveFaint('#14120f', paper, target);
+      const got = contrast(f, paper);
+      ok(got >= target, `${paper} 上按 ${target} 解出的 ${f} 只有 ${got.toFixed(2)}:1`);
+      // 「够看得清的前提下最淡的那一档」：往回退一个百分点必须掉到目标线以下，
+      // 否则说明解得偏保守、白白把字压深了。
+      for (let a = 0.2; a <= 0.96; a += 0.01) {
+        if (over('#14120f', paper, a) === f) {
+          if (a > 0.2001) {
+            const prev = over('#14120f', paper, a - 0.01);
+            ok(contrast(prev, paper) < target, `${paper} 上按 ${target} 还能更淡：${prev}`);
+          }
+          break;
         }
-        break;
       }
     }
+    // 两档不能解成同一个色，否则双阈值就白设了
+    ok(solveFaint('#14120f', paper, FAINT_TEXT_MIN) !== solveFaint('#14120f', paper, FAINT_NUM_MIN),
+      `${paper} 上 4.5 档和 3 档解出了同一个色`);
   }
   // 纸越白，淡墨要越深才够对比
   ok(solveFaint('#14120f', '#ffffff') !== solveFaint('#14120f', '#d8d4cc'),
     '不同纸色应当解出不同的淡墨');
+});
+
+test('preloader: 对比度按「最暗那一档纸」算，不是按名义纸色', () => {
+  const paper = '#f2ede3';
+  const ink = '#14120f';
+  const worst = worstPaper(paper, ink);
+  // worstPaper = 暗极色偏（掺 WASH_DARK 的墨）再被颗粒往下拉 2σ。两步都是往
+  // 暗走，所以结果一定比名义纸暗；对同一个淡墨，它给出的对比度也一定更低。
+  ok(contrast(worst, '#000000') < contrast(paper, '#000000'), `${worst} 没比 ${paper} 暗`);
+  const probe = '#7a7a7a';
+  ok(contrast(probe, worst) < contrast(probe, paper), '最坏纸给出的对比度反而更高，方向搞反了');
+
+  const faint = solveFaint(ink, worst, FAINT_TEXT_MIN);
+  const ghost = solveFaint(ink, worst, FAINT_NUM_MIN);
+  // 真正要守的是这两条：小字 4.5（WCAG 正文 AA），数字未填充那半 3（大号文字）。
+  ok(contrast(faint, worst) >= FAINT_TEXT_MIN,
+    `小字对最坏纸只有 ${contrast(faint, worst).toFixed(2)}:1`);
+  ok(contrast(ghost, worst) >= FAINT_NUM_MIN,
+    `数字空心那半对最坏纸只有 ${contrast(ghost, worst).toFixed(2)}:1`);
+  // 解出来的两个色都得真进 CSS，否则上面白算
+  ok(base.css.includes(faint), `CSS 里没有小字色 ${faint}`);
+  ok(base.css.includes(ghost), `CSS 里没有数字空心色 ${ghost}`);
+  // 数字两半必须自己也拉开，不然看不出填充到哪了
+  ok(contrast(ink, ghost) >= 3, `数字实墨/空心两半只差 ${contrast(ink, ghost).toFixed(2)}:1`);
+});
+
+test('preloader: 接缝羽化必须窄于左右留白，否则会啃掉笔画', () => {
+  // 数字的填充分界是一条 linear-gradient 硬边，直接切会有锯齿，所以在分界点
+  // 两侧各留 FEATHER 做过渡。但这个过渡区一旦比 PAD 宽，进度到 0% / 100% 时
+  // 羽化就会溢出到字形外的留白之外，把第一/最后一笔削掉一角。
+  const em = (s) => parseFloat(String(s).replace('em', ''));
+  ok(em(FEATHER) > 0, 'FEATHER 得是正数');
+  ok(em(FEATHER) < em(PAD.left), `羽化 ${FEATHER} 比左留白 ${PAD.left} 还宽`);
+  ok(em(FEATHER) < em(PAD.right), `羽化 ${FEATHER} 比右留白 ${PAD.right} 还宽`);
+  // 渐变里两侧各出现一次，一次减一次加
+  ok(base.css.includes(`- ${FEATHER})`), '渐变里没有向左的羽化');
+  ok(base.css.includes(`+ ${FEATHER})`), '渐变里没有向右的羽化');
+});
+
+test('preloader: 纸面颗粒挂三类名，压得过上游 .preloader--revealing:after', () => {
+  // 上游 `.preloader--revealing[data-v-724e2fc4]:after{opacity:1}` 是 (0,2,1)。
+  // 颗粒层也画在 ::after 上，两类名 (0,2,1) 只能打平 —— 揭幕那一刻上游把
+  // opacity 抢回 1，颗粒会突然变浓。三类名 (0,3,1) 才稳赢。
+  ok(base.css.includes('.preloader.preloader.preloader::after'),
+    '颗粒层选择器不是三类名');
+  const i = base.css.indexOf('.preloader.preloader.preloader::after');
+  const rule = base.css.slice(i, base.css.indexOf('}', i));
+  ok(rule.includes('z-index:-1'), '颗粒层没垫到文字下面');
+  ok(/url\("data:image\/svg\+xml,/.test(rule), '颗粒层没挂 feTurbulence 数据 URI');
 });
 
 test('preloader: 纸墨对比度不够 7:1 直接报错，不降级', () => {
