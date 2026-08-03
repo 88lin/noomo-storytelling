@@ -13,7 +13,8 @@
     "serve:src": "node tools/serve.js src",
     "pretest": "node tools/fetch-src.js",
     "test": "node tools/test/run.js",
-    "test:e2e": "python3 tools/test/e2e.py"
+    "test:e2e": "python3 tools/test/e2e.py",
+    "test:shots": "python3 tools/test/shots.py"
   },
   "keywords": [
     "storytelling",
