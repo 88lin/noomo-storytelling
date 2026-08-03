@@ -65,11 +65,45 @@ const SCOPE = 'data-v-724e2fc4';
 
 const STYLES = new Set(['editorial', 'progress', 'legacy']);
 
+/**
+ * 进度数字用哪套字。
+ *
+ *   sans     无衬线（TTNeoris，站内正文字体）。默认。
+ *   display  衬线斜体（TheSeasons）。⚠ 见下方 DEMO_GLYPHS 的说明。
+ */
+const NUMERALS = new Set(['sans', 'display']);
+
+/**
+ * 为什么默认不是那套好看的衬线斜体。
+ *
+ * 仓库里捆的 fonnts.com-theseasons-it.otf 是**试用版**，name[1] 写着
+ * "FSP DEMO - The Seasons"。试用版的惯常做法是把若干字形换成水印，这一份
+ * 换的就是数字 4：拆开 OTF 数一遍轮廓，0~9 里其余九个数字都是 1~3 条轮廓、
+ * 12~22 个点，只有 `4` 是 **9 条轮廓 79 个点**，而且 bounds 的 y 从 73 起
+ * （其它数字全部落在基线 0 上）—— 那不是一个 4，是一朵花瓣加一行 DEMO。
+ *
+ * 后果：进度只要走到含 4 的值（4、14、24、34、40~49、54、64、74、84、94，
+ * 一共 19 个），整屏最大的那个字就变成水印。这不是审美问题，是加载页每次
+ * 都会当着用户的面翻的车。
+ *
+ * 试过但不成立的绕法：
+ *   · unicode-range 把 `4` 单独踢给下一个 family —— 会出现"衬线斜体 1 +
+ *     无衬线 4"的混排，比水印更难看。
+ *   · local() 换系统衬线 —— 装没装、装的哪一版都不可控。
+ *   · 构建期改字体二进制 —— 改的是别人的试用版，授权状况反而更糟。
+ *
+ * 所以默认换成无衬线。想要衬线斜体就显式写 numerals:'display'，构建会给一
+ * 条告警提醒你先换成正版授权的字体文件。
+ */
+const DEMO_GLYPHS = 'fonnts.com-theseasons-it';
+
 const PRELOADER_DEFAULTS = {
   style: 'editorial',
   // editorial 用这两个：纸色和墨色。
   paper: '#f2ede3',
   ink: '#14120f',
+  // editorial 独有：进度数字用哪套字。见 NUMERALS / DEMO_GLYPHS。
+  numerals: 'sans',
   // progress 用这三个。
   background: ['#00276e', '#143a8a', '#062969'],
   accent: '#88aeff',
@@ -474,7 +508,24 @@ function worstPaper(paper, ink) {
  * 这里一律写 px，免得和那套换算搅在一起。
  */
 function cssEditorial(o) {
-  const { paper, ink, markInvert } = o;
+  const {
+    paper, ink, markInvert, numerals,
+  } = o;
+  // 字面：sans 走站内正文字体，display 走衬线斜体（试用版，见 DEMO_GLYPHS）。
+  //
+  // 换字要连着调字距，不能只换 font-family：衬线斜体本来就往右倾，-.02em
+  // 就够；TTNeoris 是直立的等宽数字（tabular-nums 打开后每位同宽），大字号
+  // 下每位右边都带一段用来对齐的余量，不多收一点，三位数读起来像三个各自
+  // 站着的字而不是一个数。-.045em 是照 420px 上限量出来的。
+  //
+  // line-height 保持 .82 不动：它和下面那条 margin-bottom:-.18em 是一对
+  // （负值专门用来收掉 .82 行盒底多出来的 .216em），单独动一个会把数字和
+  // 发丝线之间的间距重新撑开。
+  const display = numerals === 'display';
+  const numFont = display
+    ? 'font-family:var(--font-serif),serif;font-style:italic'
+    : 'font-family:var(--font-sans-regular),sans-serif;font-style:normal';
+  const numTrack = display ? '-.02em' : '-.045em';
   // 三档墨，都对着**最暗那一档纸**解，不对名义纸色解 —— 纸上叠了色偏和颗粒。
   const worst = worstPaper(paper, ink);
   const faint = solveFaint(ink, worst, FAINT_TEXT_MIN); // 小字，≥4.5:1
@@ -549,23 +600,37 @@ function cssEditorial(o) {
     `.ns-pre-mark{${mark.join(';')}}`,
     '.ns-pre-mark img{display:block;width:100%;height:auto}',
 
+    // 48px 是照桌面定的（那边数字有 360~420px）。390px 竖屏下数字只剩
+    // 163.8px，48px 的标识占到数字高的 29%，压过了页面上唯一的读数。收到
+    // 32px —— 同样是 4 的倍数，12 个方块每格 8px 仍落整像素，上面那条
+    // "边缘不会被抗锯齿磨出灰边"的论证照样成立。
+    '@media(max-width:640px){.ns-pre-mark{width:32px}}',
+
     // 字号上限 460px、下限 72px，中间跟着 min(46vw,42vh) 走 —— 竖屏手机受
     // 46vw 约束（三位数 "100" 才不会顶出容器），横屏笔记本受 42vh 约束
     // （矮视口下不会把发丝线和小字挤出屏幕）。
     // line-height:.82 是把数字上下的行距留白收掉，让它真的像一块印上去的字。
-    // justify-content:space-between 把这一行撑成"数字顶左、百分号顶右"，
-    // 两头各钉一个东西，下面那条发丝线才有两个端点可以呼应。
+    //
+    // justify-content 从 space-between 改回 flex-start。
+    //
+    // space-between 那一版的理由是"两头各钉一个东西，发丝线才有两个端点可以
+    // 呼应"。桌面下勉强说得通，移动端直接散架：390px 竖屏里 .ns-pre-pct 的
+    // clamp(13px,2vw,26px) 触底成 13px，数字右缘在 199px、百分号钉在 352px，
+    // 中间 150px 的空既不是留白也不是内容 —— 实拍出来读成布局出了 bug（见
+    // shots/01_加载页_移动.png）。百分号是数字的单位，不是版心的另一端，它
+    // 就该贴着数字站。发丝线的右端点由它自己的 width:100% 负责，不需要谁去
+    // "呼应"。
     //
     // margin-bottom 的负值是修一个看不见的洞：line-height:.82 之后行盒底比
     // 最深的字形还低 .216em（量出来的，所有数字都够不到底），叠上发丝线自己
     // 的 margin-top，数字和线之间会空出一段快 130px 的死区，整块版面被撑散。
     // 收回 .18em，剩 .036em 余量，谁也不会被切到。
     '.ns-pre-num{display:flex;align-items:baseline;'
-      + 'justify-content:space-between;gap:clamp(16px,4vw,72px);'
+      + 'justify-content:flex-start;gap:clamp(6px,1.2vw,14px);'
       + 'margin:0 0 -.18em;'
-      + 'font-family:var(--font-serif),serif;font-style:italic;font-weight:400;'
+      + `${numFont};font-weight:400;`
       + 'font-size:clamp(72px,min(42vw,40vh),420px);line-height:.82;'
-      + 'letter-spacing:-.02em;'
+      + `letter-spacing:${numTrack};`
       + 'font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}',
 
     // 数字本身就是进度条：一条 90° 硬边渐变裁进字形，分界点绑 --ns-pre-p。
@@ -597,17 +662,19 @@ function cssEditorial(o) {
       + `${ghost} calc(var(--ns-pre-cut) + ${FEATHER}),${ghost} 100%);`
       + '-webkit-background-clip:text;background-clip:text;color:transparent}}',
 
-    // 百分号：从 15px 上限提到 26px，并且改用实墨。
+    // 百分号：贴着数字，尺寸按"单位"给。
     //
-    // 上一版它是 11px 的淡墨，贴在数字右边、悬在半空中，既不是标签也不是
-    // 内容，纯粹漂着。现在它被 space-between 顶到版心右端，成了这一行的右
-    // 端点 —— 是个有位置的东西了，就得有相应的份量：字号翻一倍多，颜色回
-    // 到实墨，疏排 .24em 让它横向占住一小段，和左边 420px 的数字遥相呼应。
-    // 40 倍字号落差降到 16 倍，层次照样够，但右端不再是个可有可无的小点。
-    // 右侧 -.24em 补回疏排在最后一个字后面留的那道空隙，否则顶不齐右缘。
+    // 上一版把它疏排 .24em 顶到版心右端，是为了给发丝线凑一个右端点；那条
+    // 理由已经在 .ns-pre-num 那里推翻了。回到数字旁边之后，疏排就成了纯粹
+    // 的害处（单个字符的 letter-spacing 只会在它右边多留一道空），归零。
+    //
+    // 字号从 clamp(13px,2vw,26px) 提到 clamp(22px,4.6vw,44px)：移动端
+    // 2vw 在 390px 屏上触底成 13px，和 163.8px 的数字是 12.6 倍落差，小到
+    // 像个脚注；4.6vw 给出 17.9px，配上 22px 的下限落在 22px，落差 7.4 倍
+    // —— 仍然明确分主次，但读得出它是同一个读数的一部分。
     `.ns-pre-pct{font-family:var(--font-sans-regular),sans-serif;font-style:normal;`
-      + `font-size:clamp(13px,2vw,26px);letter-spacing:.24em;`
-      + `margin:0 -.24em 0 0;color:${ink}}`,
+      + `font-size:clamp(22px,4.6vw,44px);letter-spacing:0;`
+      + `margin:0;color:${ink}}`,
 
     // 发丝线：版心的地平线，静态。上面是标识和数字，下面是提示，右端接住
     // 百分号 —— 它的职责是给这块排印一条底边，不是第二个进度条。
@@ -690,10 +757,11 @@ function cssProgress(o) {
  */
 function buildPreloader(site) {
   const errors = [];
+  const warnings = [];
   const p = Object.assign({}, PRELOADER_DEFAULTS, (site && site.preloader) || {});
   const style = p.style;
   const none = {
-    css: '', errors, anchors: [], classes: [], style,
+    css: '', errors, warnings, anchors: [], classes: [], style,
   };
 
   if (!STYLES.has(style)) {
@@ -714,6 +782,22 @@ function buildPreloader(site) {
         + `${c.toFixed(2)}:1，加载页要求至少 ${PAPER_INK_MIN}:1（WCAG AAA）。`
         + '把纸调浅或者把墨调深。');
     }
+  }
+
+  // 数字字面。配错了直接报错（拼错一个词就静默换套字，比报错更糟）；配成
+  // display 则放行但给一条告警 —— 那套字好看，但捆进来的是试用版。
+  if (!NUMERALS.has(p.numerals)) {
+    errors.push(`site.preloader.numerals: 未知取值 ${JSON.stringify(p.numerals)}`
+      + `（可选: ${[...NUMERALS].join(', ')}）`);
+  }
+  const numerals = NUMERALS.has(p.numerals) ? p.numerals : PRELOADER_DEFAULTS.numerals;
+  if (style === 'editorial' && numerals === 'display') {
+    warnings.push('site.preloader.numerals: display 用的是仓库里捆的 '
+      + `${DEMO_GLYPHS}（试用版，字体内部名 "FSP DEMO - The Seasons"）。`
+      + '它把数字 4 的字形换成了水印图案（9 条轮廓 79 个点，其余数字只有 '
+      + '1~3 条），进度走到 4、14、24、34、40~49、54、64、74、84、94 这 19 '
+      + '个值时，整屏最大的那个字会变成一朵花瓣加一行 DEMO。上生产前请换成 '
+      + '正版授权的字体文件，或者改回 numerals:\'sans\'。');
   }
 
   // 'auto'：浅底（editorial）要把白标识压成黑的，深底（progress）不用动。
@@ -836,11 +920,14 @@ function buildPreloader(site) {
 
   return {
     css: style === 'editorial'
-      ? cssEditorial({ paper, ink, markInvert })
+      ? cssEditorial({
+        paper, ink, markInvert, numerals,
+      })
       : cssProgress({
         background: bg, glow, accent, markInvert,
       }),
     errors,
+    warnings,
     anchors,
     classes: PRELOADER_CLASSES,
     style,
@@ -866,6 +953,8 @@ module.exports = {
   PRELOADER_DEFAULTS,
   PRELOADER_CLASSES,
   STYLES,
+  NUMERALS,
+  DEMO_GLYPHS,
   PAPER_INK_MIN,
   FAINT_TEXT_MIN,
   FAINT_NUM_MIN,
