@@ -23,7 +23,10 @@ npm-debug.log*
 # 临时文件
 .tmp/
 .temp/
+artifacts/
+shots/
 
 # Python 字节码（跑 e2e 时产生）
 __pycache__/
 *.pyc
+.pytest_cache/

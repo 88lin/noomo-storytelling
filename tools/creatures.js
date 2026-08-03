@@ -253,7 +253,7 @@ function buildCreatures(scene, crystalInfo, engineSrc) {
       if (engineSrc.split(needle).length - 1 !== 1) {
         errors.push(`scene.creatures: 引擎快照里找不到「${what}」，`
           + '这份 src/_nuxt 不是本模板对应的那一份，小动物注入会打黑整站。'
-          + '请先 npm run fetch-src 取回配套产物，或把 scene.creatures.enabled 设为 false。');
+          + '请恢复仓库内 src/ 快照，或把 scene.creatures.enabled 设为 false。');
       }
     }
     if (errors.length) return off;

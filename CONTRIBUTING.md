@@ -1,8 +1,8 @@
 # 贡献指南
 
 欢迎提交 Issue 和 Pull Request。这个仓库是一套**可配置的 3D 叙事页模板**，
-只存放本项目自己写的代码（`tools/`、`config/`、`docs/`），
-上游站点快照 `src/` 不入库。
+构建工具与配置在 `tools/`、`config/`、`docs/`；站点静态快照保存在 `src/`，
+构建不依赖外部网络。
 
 ## 开发环境
 
@@ -18,16 +18,16 @@
 git clone https://github.com/88lin/noomo-storytelling.git
 cd noomo-storytelling
 
-npm run fetch-src   # 首次必跑：从快照仓库固定提交取回 src/（70 个文件，约 11 MB）
+npm run fetch-src   # 校验仓库内 src/ 快照（70 个文件，约 11 MB）
 npm run build       # 构建到 dist/
 npm run serve       # 本地预览 dist/，默认端口 3000
 npm run dev         # 边改边看：监听 config/ 与 tools/，自动重建 + 浏览器刷新
-npm test            # 279 项单元测试
+npm test            # 326 项单元测试
 npm run test:e2e    # 可选：真浏览器验收
 ```
 
 **不需要 `npm install`。** `build`、`dev`、`test` 都挂了 `pre` 钩子，
-`src/` 不在时会自动调用 `tools/fetch-src.js` 补拉，所以直接跑 `npm run build` 也行。
+会先校验 `src/` 是否完整；缺文件时列出路径并停止，不会访问外部仓库。
 
 ## 该改哪里
 
@@ -36,12 +36,11 @@ npm run test:e2e    # 可选：真浏览器验收
 | 改文案、品牌、配色、滚动节奏 | `config/` 下三个文件 | 一般不需要动 `tools/` |
 | 加新的 DSL 记法 | `tools/markup.js` | 必须同时补 `tools/test/markup.test.js` |
 | 加新的锚点替换 | `tools/anchors.js` | 见下方「锚点的唯一性」 |
-| 改构建流程 | `tools/build.js` | 跑一遍 `npm test`，确认 279 项全过 |
+| 改构建流程 | `tools/build.js` | 跑一遍 `npm test`，确认 326 项全过 |
 | 改加载页 / 菜单 / 水晶 | `tools/preloader.js`、`tools/menu.js`、`tools/crystals.js` | 三者都有对应测试文件 |
 
-**请不要提交 `src/` 下的任何文件。** 它已在 `.gitignore` 里，
-内容来自对原站的静态克隆，版权不属于本项目。
-需要换素材请改 `config/scene.js` 的 `assets`，指向你自己有权使用的文件。
+`src/` 中的第三方快照不属于本项目 MIT 授权范围。需要换素材请改
+`config/scene.js` 的 `assets`，并确认新文件有合适的再分发授权。
 
 ### 锚点的唯一性
 
@@ -59,7 +58,7 @@ npm run test:e2e    # 可选：真浏览器验收
 
 1. Fork 本仓库
 2. 建分支：`git checkout -b feat/你的功能名`
-3. 改代码，**跑一遍 `npm test`**，确认 279 项全过
+3. 改代码，**跑一遍 `npm test`**，确认 326 项全过
 4. 提交：`git commit -m "描述你的修改"`
 5. 推送：`git push origin feat/你的功能名`
 6. 开 Pull Request，说明改了什么、为什么、怎么验证的
@@ -89,4 +88,4 @@ npm run test:e2e    # 可选：真浏览器验收
 ## 许可证
 
 本仓库的代码使用 [MIT 许可证](./LICENSE)，提交的代码同样遵循该许可证。
-`npm run fetch-src` 取回的 `src/` 内容**不在此授权范围内**，详见 `README.md` 开头的说明。
+`src/` 中的第三方快照**不在此授权范围内**，详见 `README.md` 开头的说明。

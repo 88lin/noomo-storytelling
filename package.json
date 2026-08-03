@@ -2,7 +2,7 @@
   "name": "noomo-storytelling",
   "version": "2.0.0",
   "private": true,
-  "description": "可配置的沉浸式 3D 数字叙事网站模板 —— 文案、品牌、排版、滚动节奏、视觉素材全部收敛到 config/ 三个文件，零依赖构建。站点素材由 npm run fetch-src 按需取回，不入库。",
+  "description": "可配置的沉浸式 3D 数字叙事网站模板 —— 文案、品牌、排版、滚动节奏、视觉素材全部收敛到 config/ 三个文件，零依赖构建。原始站点快照随仓库提供，由 npm run fetch-src 做本地完整性校验。",
   "scripts": {
     "fetch-src": "node tools/fetch-src.js",
     "prebuild": "node tools/fetch-src.js",

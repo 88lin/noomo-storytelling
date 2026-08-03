@@ -128,6 +128,7 @@ function make404(site) {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#062969">
 <title>404 · ${e(meta.title)}</title>
 <link rel="icon" type="image/png" href="${e(meta.basePath)}${e(meta.favicon.out)}">
 <meta name="robots" content="noindex">
@@ -149,7 +150,9 @@ body{background:#062969;color:#f5f5f5;display:flex;flex-direction:column;
   color:#f5f5f5;text-decoration:none;font-size:1rem;
   transition:background .3s ease,border-color .3s ease}
 .home:hover{background:rgba(245,245,245,.12);border-color:#f5f5f5}
+.home:focus-visible{outline:2px solid #88aeff;outline-offset:4px}
 .rights{position:fixed;bottom:2rem;font-size:.875rem;opacity:.61;margin:0}
+@media(prefers-reduced-motion:reduce){.home{transition:none}}
 </style>
 </head>
 <body>

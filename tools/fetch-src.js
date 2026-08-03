@@ -1,34 +1,26 @@
 #!/usr/bin/env node
 /**
- * tools/fetch-src.js —— 拉取上游站点快照到 src/
+ * tools/fetch-src.js —— 校验仓库内站点快照 src/
  *
- * 本模板只收录**自己写的**构建代码（tools/、config/、docs/），不收录
- * Noomo Agency 的模型、贴图、音频与商用字体。那些文件公开存放在克隆快照仓库里，
- * 由这个脚本按需取回，落到 src/ 下，再交给 tools/build.js 做构建期烘焙。
+ * 原始站点快照已经随模板迁入 src/，因此构建不依赖网络或另一个仓库。
+ * 这个脚本只负责验证快照完整性，再交给 tools/build.js 做构建期烘焙。
  *
- *   node tools/fetch-src.js            # src/ 已存在则跳过
- *   node tools/fetch-src.js --force    # 强制重取
+ *   node tools/fetch-src.js            # 验证 src/ 是否完整
  *
- * 零依赖，只用 Node 内置模块 + 系统 git。
+ * 零依赖，只用 Node 内置模块。
  */
 
 'use strict';
 
-const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC_DIR = path.join(ROOT, 'src');
 
-/** 上游快照仓库（公开）。PIN 是本模板全部锚点所校准的那个提交，不要随意改。 */
-const UPSTREAM = 'https://github.com/88lin/noomo-storytelling-clone-zh.git';
-const PIN = '1412a9f98e976cd60703a60918d40b338a4bff89';
-
 /**
- * 需要取回的 70 个文件。清单写死而不是「整个目录照搬」，是为了让
- * 上游仓库将来新增无关文件时，本模板的 src/ 仍然是可预期的。
+ * 需要存在的 70 个文件。清单写死是为了让误删或半截快照在构建前就失败，
+ * 而不是等锚点替换或浏览器加载时才暴露。
  */
 const FILES = [
   '.nojekyll',
@@ -111,93 +103,26 @@ const CRITICAL = [
   '_nuxt/entry.BEbxiOYI.css',
 ];
 
-function git(args, cwd) {
-  return execFileSync('git', args, {
-    cwd,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    encoding: 'utf8',
-    maxBuffer: 1 << 26,
-  });
-}
-
-function haveGit() {
-  try {
-    git(['--version'], ROOT);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function fmt(bytes) {
-  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + ' MB';
-  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + ' KB';
-  return bytes + ' B';
-}
-
 function main() {
-  const force = process.argv.includes('--force');
-
-  if (!force && fs.existsSync(path.join(SRC_DIR, 'index.html'))) {
-    const n = FILES.filter((f) => fs.existsSync(path.join(SRC_DIR, f))).length;
-    if (n === FILES.length) {
-      console.log(`src/ 已就绪（${n} 个文件），跳过。要重取请加 --force`);
-      return;
-    }
-    console.log(`src/ 不完整（${n}/${FILES.length}），重新取回`);
-  }
-
-  if (!haveGit()) {
-    console.error('找不到 git。请先安装 git，或手动把下面这个仓库的内容拷进 src/：');
-    console.error(`  ${UPSTREAM}  @ ${PIN.slice(0, 7)}`);
+  const missing = FILES.filter((rel) => {
+    const file = path.join(SRC_DIR, rel);
+    try { return !fs.existsSync(file) || !fs.statSync(file).isFile(); }
+    catch (_) { return true; }
+  });
+  if (missing.length) {
+    console.error(`src/ 快照不完整：缺少或为空 ${missing.length} 个文件`);
+    for (const rel of missing.slice(0, 12)) console.error(`  src/${rel}`);
+    console.error('请恢复仓库中的 src/ 文件后重试；此项目不访问外部仓库下载素材。');
     process.exit(1);
   }
-
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'noomo-src-'));
-  try {
-    console.log(`拉取上游快照 ${PIN.slice(0, 7)} …`);
-    // 只取一个提交的树，不要历史；blob:none 让二进制按需下载，首次仍会拉全量但省掉历史。
-    git(['init', '--quiet', tmp], undefined);
-    git(['remote', 'add', 'origin', UPSTREAM], tmp);
-    git(['fetch', '--quiet', '--depth', '1', 'origin', PIN], tmp);
-    git(['checkout', '--quiet', 'FETCH_HEAD'], tmp);
-
-    let copied = 0;
-    let bytes = 0;
-    const missing = [];
-
-    for (const rel of FILES) {
-      const from = path.join(tmp, rel);
-      if (!fs.existsSync(from)) {
-        missing.push(rel);
-        continue;
-      }
-      const to = path.join(SRC_DIR, rel);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      fs.copyFileSync(from, to);
-      bytes += fs.statSync(to).size;
-      copied += 1;
-    }
-
-    if (missing.length) {
-      console.error(`上游缺少 ${missing.length} 个文件：`);
-      for (const m of missing.slice(0, 10)) console.error('  ' + m);
+  for (const c of CRITICAL) {
+    const p = path.join(SRC_DIR, c);
+    if (!fs.existsSync(p) || fs.statSync(p).size === 0) {
+      console.error(`关键文件缺失或为空：src/${c}`);
       process.exit(1);
     }
-
-    for (const c of CRITICAL) {
-      const p = path.join(SRC_DIR, c);
-      if (!fs.existsSync(p) || fs.statSync(p).size === 0) {
-        console.error(`关键文件缺失或为空：src/${c}`);
-        process.exit(1);
-      }
-    }
-
-    console.log(`已写入 src/：${copied} 个文件，${fmt(bytes)}`);
-    console.log('接下来跑：npm run build');
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
   }
+  console.log(`src/ 已就绪（${FILES.length} 个文件），使用仓库内快照`);
 }
 
 main();

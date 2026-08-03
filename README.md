@@ -17,8 +17,8 @@ dist/             可直接部署的静态站点（GitHub Pages / 任意静态�
 <p align="left">
   <img alt="Node" src="https://img.shields.io/badge/Node-%E2%89%A518-3c873a">
   <img alt="依赖" src="https://img.shields.io/badge/npm%20%E4%BE%9D%E8%B5%96-0-blue">
-  <img alt="单元测试" src="https://img.shields.io/badge/%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95-279-brightgreen">
-  <img alt="端到端" src="https://img.shields.io/badge/%E7%AB%AF%E5%88%B0%E7%AB%AF-125-brightgreen">
+  <img alt="单元测试" src="https://img.shields.io/badge/%E5%8D%95%E5%85%83%E6%B5%8B%E8%AF%95-326-brightgreen">
+  <img alt="端到端" src="https://img.shields.io/badge/%E7%AB%AF%E5%88%B0%E7%AB%AF-Playwright%20%E5%8F%AF%E9%80%89-blue">
   <img alt="工具层许可" src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E5%B1%82-MIT-lightgrey">
 </p>
 
@@ -34,20 +34,19 @@ dist/             可直接部署的静态站点（GitHub Pages / 任意静态�
 | [🎨 四、三项视觉设计](#-四三项视觉设计) | 📜 加载页 / ❄️ 移动端菜单 / 💎 水晶 |
 | [🌐 五、部署](#-五部署) | GitHub Pages 与子路径那个坑 |
 | [🔧 六、工作原理](#-六工作原理) | 黑盒替换管线怎么跑的 |
-| [🧪 七、测试](#-七测试) | 279 + 125，以及验不了的部分 |
+| [🧪 七、测试](#-七测试) | 326 项单测 + 可选浏览器验收 |
 | [🗂 八、目录结构](#-八目录结构) | 文件放在哪 |
 | [🧭 九、常见操作速查](#-九常见操作速查) | 想改 X 去哪改 |
-| [🐞 十、已知问题与限制](#-十已知问题与限制) | 上游的坑与环境的坑 |
+| [🐞 十、已知问题与限制](#-十已知问题与限制) | 原始快照的坑与环境的坑 |
 | [📄 十一、许可](#-十一许可) | |
 
 ---
 
 ## ⚠️ 一、先读：素材与字体的授权
 
-**本仓库只存放 `tools/`、`config/`、`docs/` —— 全部是本项目自己写的代码，MIT 授权。
-`src/` 不入库**，由 `npm run fetch-src` 从快照仓库
-[88lin/noomo-storytelling-clone-zh](https://github.com/88lin/noomo-storytelling-clone-zh)
-的固定提交 `1412a9f` 取回到本地（清单写死在 `tools/fetch-src.js`，70 个文件、11.1 MB）。
+**本仓库的 `tools/`、`config/`、`docs/` 是本项目自己写的代码，MIT 授权；
+`src/` 快照现在随本仓库一起提供，`npm run fetch-src` 只做本地完整性校验，
+不访问外部仓库（清单写死在 `tools/fetch-src.js`，70 个文件、约 11.1 MB）。
 
 这么分是有原因的：`src/` 来自对
 [storytelling.noomoagency.com](https://storytelling.noomoagency.com)
@@ -74,16 +73,16 @@ dist/             可直接部署的静态站点（GitHub Pages / 任意静态�
 git clone https://github.com/88lin/noomo-storytelling.git
 cd noomo-storytelling
 
-npm run fetch-src # 首次必跑：拉取上游站点快照到 src/（70 个文件，约 11 MB）
-npm run build     # 构建到 dist/（70 个文件，约 11.2 MB）
+npm run fetch-src # 校验仓库内 src/ 快照（70 个文件，约 11 MB）
+npm run build     # 构建到 dist/（源文件 70 个 + 2 个生成文件）
 npm run serve     # 本地预览 dist/（端口 3000，自动挂在配置的 basePath 下）
 npm run dev       # 边改边看：监听 config/ 与 tools/，改完自动重建 + 浏览器自动刷新
-npm test          # 279 项单元测试（纯 Node，无依赖）
-npm run test:e2e  # 可选：125 项真浏览器验收（需 Python + Playwright）
+npm test          # 326 项单元测试（纯 Node，无依赖）
+npm run test:e2e  # 可选：真浏览器验收（需 Python + Playwright）
 ```
 
-`npm run build` 与 `npm test` 都挂了 `pre` 钩子，`src/` 不在时会自动补拉，
-所以实际上直接跑 `npm run build` 也行。
+`npm run build` 与 `npm test` 都挂了 `pre` 钩子，会先校验 `src/` 是否完整；
+所以实际上直接跑 `npm run build` 也行。缺文件时会立即提示具体路径，不会偷偷联网下载。
 
 改文案 → 存盘 → 浏览器自己刷新，一次全量重建实测 **203~224 ms**。
 配置写错不会让 dev 进程挂掉：终端打印中文报错，`dist/` 保留上一次能用的版本，改回来自动恢复。
@@ -236,7 +235,7 @@ module.exports = {
 
 ## 🎨 四、三项视觉设计
 
-克隆快照原样保留了上游的加载页、移动端菜单和水晶配色。这三处在本模板里被重做过，
+原始快照保留了站点的加载页、移动端菜单和水晶配色。这三处在本模板里被重做过，
 每一处都可以在配置里换预设或整个关掉。三套设计**刻意不共用色板** —— 加载页是暖白纸，
 菜单是冷墨黑，水晶是七色棱镜，避免整站变成同一坨蓝渐变。
 
@@ -507,14 +506,14 @@ src/_nuxt/story.data.js   ← 构建时新生成：5 个故事数组
 ## 🧪 七、测试
 
 ```bash
-npm test          # 279 项单元测试
-npm run test:e2e  # 125 项真浏览器验收
+npm test          # 326 项单元测试
+npm run test:e2e  # 可选的 Playwright 真浏览器验收
 ```
 
 | 层 | 数量 | 覆盖 |
 | --- | --- | --- |
-| 单元（纯 Node，零依赖） | **279** | DSL 编译、位置求值、锚点唯一性与产物断言、故事块、场景 payload、类名白名单、加载页、菜单、水晶、颗粒标定与最坏对比度模型、构建产物 |
-| 端到端（Playwright） | **125** | 注水后中文没被换回英文、外链行为与 `rel`、子路径无 404、404 页、加载页真实进度、菜单实拍像素对比度、控制台零报错 |
+| 单元（纯 Node，零依赖） | **326** | DSL 编译、位置求值、锚点唯一性与产物断言、故事块、场景 payload、类名白名单、加载页、菜单、水晶、颗粒标定、构建产物与静态服务器请求解析 |
+| 端到端（Playwright，可选） | 按配置执行 | 注水后中文没被换回英文、外链行为与 `rel`、子路径无 404、404 页、加载页真实进度、菜单实拍像素对比度、控制台零报错 |
 
 e2e 需要 `pip install playwright && playwright install chromium`，**故意不作为构建依赖**。
 它检查的核心是「Vue 注水之后中文还在不在」—— 这正是原始克隆站翻译失败的地方：
@@ -533,7 +532,7 @@ config/          三个配置文件（你主要改这里）
   site.js        站点外壳 / 加载页 / 菜单 / 主题 / 404
   story.js       17 个文字块 + 7 个项目热区
   scene.js       滚动节奏 / 水晶配色 / 素材路径
-src/             原站静态产物（黑盒，不入库，由 npm run fetch-src 取回）
+src/             原站静态产物（黑盒，随仓库提供，由 npm run fetch-src 校验）
 tools/
   build.js       构建入口
   dev.js         监听 + 热重载
@@ -556,8 +555,8 @@ tools/
   paths.js       路径、产物文件名、预载字体清单
   runtime/story-runtime.js      注入引擎的故事数据读取器
   runtime/preloader-runtime.js  加载页真实进度与揭幕握手
-  fetch-src.js   从快照仓库固定提交取回 src/（70 个文件）
-  test/          279 项单元测试 + e2e.py（125 项 Playwright 验收）
+  fetch-src.js   校验仓库内 src/ 快照（70 个文件）
+  test/          326 项单元测试 + e2e.py（Playwright 可选）
 docs/
   改造说明.md    从克隆站到模板的完整改造记录
   代码审查.md    全仓审查结论、已修问题、不改的理由、环境限制

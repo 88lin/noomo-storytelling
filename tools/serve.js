@@ -41,6 +41,27 @@ const MIME = {
   '.woff2': 'font/woff2',
 };
 
+/** Decode a request path and strip the configured deployment prefix. */
+function parseRequestUrl(raw, base) {
+  const source = String(raw || '/').split('?')[0] || '/';
+  let url;
+  try {
+    url = decodeURIComponent(source);
+  } catch (_) {
+    return { status: 400, url: source };
+  }
+  if (url.includes('\0')) return { status: 400, url };
+
+  const mount = (base || '/').replace(/\/*$/, '/') || '/';
+  if (mount !== '/') {
+    const root = mount.slice(0, -1) || '/';
+    if (url === root) url = '/';
+    else if (url.startsWith(mount)) url = `/${url.slice(mount.length)}`;
+    else return { status: 404, outsideBase: true, url };
+  }
+  return { status: 200, url: url || '/' };
+}
+
 /**
  * @param {object} opts
  * @param {string} opts.dir      要服务的目录
@@ -55,15 +76,27 @@ function createServer(opts) {
   const inject = opts.inject || '';
 
   return http.createServer((req, res) => {
-    let url = decodeURIComponent(req.url.split('?')[0]);
-    if (base !== '/' && url.startsWith(base)) url = `/${url.slice(base.length)}`;
-    else if (base !== '/' && `${url}/` === base) url = '/';
+    const parsed = parseRequestUrl(req.url, base);
+    if (parsed.status !== 200) {
+      if (parsed.outsideBase && opts.onMiss) opts.onMiss(parsed.url);
+      res.writeHead(parsed.status, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(String(parsed.status));
+      return;
+    }
+    const url = parsed.url;
 
     if (opts.routes && opts.routes(url, req, res)) return;
 
     // 路径必须落在 dir 之内。path.normalize 已经能吃掉多余的 ..，但这里再
     // 显式确认一次绝对路径的归属 —— 这个服务器有可能被临时暴露到公网预览。
-    let file = path.resolve(dir, `.${path.posix.normalize(url)}`);
+    let file;
+    try {
+      file = path.resolve(dir, `.${path.posix.normalize(url)}`);
+    } catch (_) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('400');
+      return;
+    }
     if (file !== dir && !file.startsWith(dir + path.sep)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('403');
@@ -102,7 +135,7 @@ function createServer(opts) {
   });
 }
 
-module.exports = { createServer, MIME };
+module.exports = { createServer, MIME, parseRequestUrl };
 
 if (require.main === module) {
   const PORT = Number(process.env.PORT) || 3000;
