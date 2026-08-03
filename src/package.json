@@ -1,0 +1,35 @@
+{
+  "name": "noomo-storytelling-clone-zh",
+  "version": "1.0.0",
+  "description": "Noomo Storytelling 网站的中文开源克隆版 — 沉浸式 3D 数字叙事体验",
+  "main": "index.html",
+  "scripts": {
+    "start": "node serve.js",
+    "serve": "node serve.js",
+    "dev": "node serve.js"
+  },
+  "keywords": [
+    "storytelling",
+    "3d-website",
+    "threejs",
+    "webgl",
+    "nuxt",
+    "vue",
+    "gsap",
+    "lenis",
+    "沉浸式",
+    "数字叙事",
+    "中文",
+    "chinese"
+  ],
+  "author": "88lin",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/88lin/noomo-storytelling-clone-zh.git"
+  },
+  "homepage": "https://github.com/88lin/noomo-storytelling-clone-zh#readme",
+  "engines": {
+    "node": ">=12.0.0"
+  }
+}

@@ -1,6 +1,3 @@
-# 上游站点快照（由 npm run fetch-src 取回，不入库 —— 版权不属于本项目）
-src/
-
 # 构建产物（由 npm run build 生成，不入库）
 dist/
 
