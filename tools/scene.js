@@ -108,7 +108,8 @@ function normalizeScene(raw, engineSrc) {
   };
 
   for (const k of Object.keys(raw)) {
-    if (!['quality', 'sound', 'startColor', 'sections', 'assets', 'crystals'].includes(k)) {
+    if (!['quality', 'sound', 'startColor', 'sections', 'assets', 'crystals',
+      'creatures'].includes(k)) {
       errors.push(`scene: 未知字段 "${k}"`);
     }
   }

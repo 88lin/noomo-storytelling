@@ -28,6 +28,7 @@ const { buildTheme } = require('./theme');
 const { buildMenuCss } = require('./menu');
 const { buildPreloader } = require('./preloader');
 const { buildCrystals } = require('./crystals');
+const { buildCreatures } = require('./creatures');
 const payload = require('./payload');
 const {
   loadClasses, unknownClasses, suggest, UPSTREAM_CLASSES,
@@ -228,6 +229,12 @@ function build({ log = console.log } = {}) {
   const crystals = buildCrystals(rawScene);
   errors.push(...crystals.errors);
 
+  // 七颗水晶换成七只程序化磨砂小动物：整个换掉项目层的 mesh，走引擎的
+  // 标准单通道渲染路径，而不是给上游那套磨砂立方体管线换个模型文件。
+  // 颜色沿用上面这套水晶配色（baseColor 是引擎里的一根颜色弹簧）。
+  const creatures = buildCreatures(rawScene, crystals, sources.engine);
+  errors.push(...creatures.errors);
+
   const compiled = compileStory(rawStory, scene.sections.length || 20, known);
   errors.push(...compiled.errors);
 
@@ -248,6 +255,7 @@ function build({ log = console.log } = {}) {
   const sceneAnchors = buildSceneAnchors(scene);
   const anchors = [
     ...shellAnchors, ...sceneAnchors, ...pre.anchors, ...crystals.anchors,
+    ...creatures.anchors,
   ];
   const res = applyAnchors(patched, anchors);
   patched = res.out;
@@ -302,7 +310,8 @@ function build({ log = console.log } = {}) {
     log(`  文案补丁   ${res.applied.length} 处（外壳 ${shellAnchors.length}`
       + ` + 滚动节奏 ${sceneAnchors.length}`
       + `${pre.anchors.length ? ` + 加载页 ${pre.anchors.length}` : ''}`
-      + `${crystals.anchors.length ? ` + 水晶 ${crystals.anchors.length}` : ''}）`);
+      + `${crystals.anchors.length ? ` + 水晶 ${crystals.anchors.length}` : ''}`
+      + `${creatures.anchors.length ? ` + 小动物 ${creatures.anchors.length}` : ''}）`);
     log(`  故事块     smallLight ${s.smallLight} / smallDark ${s.smallDark} / `
       + `big ${s.big} / lines ${s.lines} / cases ${s.cases}`);
     log(`  滚动段落   ${scene.sections.length} 段，桌面合计 `
@@ -313,12 +322,16 @@ function build({ log = console.log } = {}) {
     log(`  加载页     ${pre.style}（${PRE_LABEL[pre.style] || '真实进度'}）`);
     log(`  水晶       ${crystals.palette}（${crystals.label}）`
       + `${crystals.anchors.length ? '' : ' — 与上游一致，未下补丁'}`);
+    log(`  小动物     ${creatures.enabled
+      ? `${creatures.names.join(' / ')}（${creatures.detail} / ${creatures.tint}）`
+      : '关闭 — 保持上游水晶'}`);
     log(`  文件       ${copied} 个（其中 ${swapped.length} 个由 config 替换）`);
     if (swapped.length) {
       for (const j of swapped) log(`               ${path.relative(ROOT, j.src)} → ${j.out}`);
     }
     for (const w of menu.warnings) log(`  ⚠ ${w}`);
     for (const w of crystals.warnings) log(`  ⚠ ${w}`);
+    for (const w of creatures.warnings) log(`  ⚠ ${w}`);
   }
 
   return { dist: DIST_DIR, stats: compiled.stats, anchors: res.applied.length, ms };
