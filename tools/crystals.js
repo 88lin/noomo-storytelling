@@ -232,9 +232,13 @@ const toward = (v, t, k) => v + (t - v) * k;
 const PALETTES = {
   // 棱镜 —— 默认。唯一一个**静止态就逐颗给色**的预设。
   //
-  // 色相沿暖到冷走一圈：金 38° → 珊瑚 12° → 玫瑰 330° → 紫 286° →
-  // 靛 224° → 青 188° → 薄荷 152°。相邻间隔 26°–38°，在多通道折射糊过
+  // 色相沿暖到冷走一圈：金 42° → 珊瑚 12° → 玫瑰 330° → 紫 286° →
+  // 靛 224° → 青 188° → 薄荷 152°。相邻间隔 30°–62°，在多通道折射糊过
   // 一层之后仍然分得开；顺序是单调的，7 颗横排过去像一道分光。
+  //
+  // 金那一颗原本是 38°。静止态明度抬到 .86 之后，8 位色深下 #f6e2c1 与
+  // #f6d0c6 量回来只差 24.9°，卡在 e2e 的 25° 硬线下面 —— 高明度色相的
+  // 量化台阶本来就粗。把标称值挪到 42°，量回来 27.9°，留出余量。
   //
   // 明度静止 .86–.89 / 悬停 .77–.80 —— 见文件头「为什么 baseColor 真的
   // 看得见」：玻璃色是乘上去的，静止态压暗会把刻面高光一起乘没。
@@ -242,7 +246,7 @@ const PALETTES = {
   // 突然浓起来」，不是换个颜色，读起来才像同一块玻璃被点亮。
   prism: {
     label: '棱镜',
-    hues: [38, 12, 330, 286, 224, 188, 152],
+    hues: [42, 12, 330, 286, 224, 188, 152],
     sat: [0.88, 0.86, 0.84, 0.80, 0.84, 0.86, 0.82],
     light: [0.78, 0.79, 0.80, 0.80, 0.78, 0.77, 0.78],
     // 静止态：高饱和 + 高明度 = 「淡染的白」，而不是「浅色漆」。
@@ -611,7 +615,8 @@ function buildCrystals(scene) {
   const colors = start.hovers.map((h) => h.baseColor);
   const restColors = start.rests ? start.rests.map((r) => r.baseColor) : [];
   if (errors.length) {
-    return { anchors: [], errors, warnings, palette, label: labelOf(palette), colors, restColors };
+    return { anchors: [], errors, warnings, palette, label: labelOf(palette),
+      colors, restColors, baseColor: start.base.baseColor };
   }
 
   const nextBase = `crystal:${serializeObj(start.base)}`
@@ -643,7 +648,8 @@ function buildCrystals(scene) {
     });
   }
 
-  return { anchors, errors, warnings, palette, label: labelOf(palette), colors, restColors };
+  return { anchors, errors, warnings, palette, label: labelOf(palette),
+    colors, restColors, baseColor: start.base.baseColor };
 }
 
 module.exports = {
