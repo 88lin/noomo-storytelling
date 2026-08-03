@@ -15,7 +15,7 @@ Python + Playwright 跑，不进 package.json 的依赖。
     3  外部项目链接走新标签页，不触发前端路由；留空的不可点击
     4  子路径部署（/sub/）下没有 404
     5  加载页：SSR 首帧就有骨架、百分比从 0 单调涨到 100、揭幕后节点离开 DOM
-    6  移动端菜单：打开后真有背景，frost/ink 实拍像素上白字对比度 ≥ 7:1
+    6  移动端菜单：打开后真有背景，实拍像素上「实际文字色」对比度 ≥ 7:1
     7  水晶：构建产物里 crystalHovers 恰好 7 组、色相拉得开
     8  控制台无报错、无注水不匹配警告
 
@@ -122,6 +122,18 @@ def luminance(rgb) -> float:
 def contrast(a, b) -> float:
     la, lb = luminance(a), luminance(b)
     return (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+
+
+def parse_rgb(css: str):
+    """把 computed style 的 rgb()/rgba() 拆成三元组。拆不出来返回 None。
+
+    菜单从 frost 换成 paper 之后文字色不再恒是白的，实拍对比度必须按实际
+    取到的文字色去算，写死 (255,255,255) 会让墨字方案永远挂在 1.2:1。
+    """
+    nums = re.findall(r"[\d.]+", css or "")
+    if len(nums) < 3:
+        return None
+    return tuple(int(round(float(n))) for n in nums[:3])
 
 
 def hue_of(rgb) -> float:
@@ -240,8 +252,34 @@ def static_checks() -> None:
               "editorial：数字四周补了挑出量，并用负 margin 抵回原位")
         check("100% - .26em" in style,
               "editorial：分界点把左右 padding 从映射里减了回去")
-        check("var(--font-serif)" in style and "font-style:italic" in style,
-              "editorial：数字是衬线斜体")
+        # 捆在产物里的 TheSeasons 是「FSP DEMO」试用版：4 号字形被换成了花瓣 +
+        # DEMO 水印（9 条轮廓 / 79 个点，其余数字都只有 1–3 条）。进度只要走到
+        # 含 4 的值（4、14、24…94 共 19 个），那个巨大的数字上就会盖出水印。
+        # 所以默认把数字换成 TTNeoris（sans）；要衬线斜体得显式写
+        # numerals:'display'，构建期会另给一条试用版告警。
+        numerals = cfg.get("preloader", {}).get("numerals", "sans")
+        i_num = style.index(".ns-pre-num{")
+        seg_num = style[i_num:style.index("}", i_num)]
+        if numerals == "display":
+            check("var(--font-serif)" in seg_num
+                  and "font-style:italic" in seg_num,
+                  "editorial：numerals=display 时数字回到衬线斜体", seg_num[:140])
+        else:
+            check("var(--font-sans-regular)" in seg_num
+                  and "font-style:normal" in seg_num,
+                  "editorial：数字走无衬线（捆的衬线体把 4 换成了 DEMO 水印）",
+                  seg_num[:140])
+        # 百分号原先被 space-between 甩到版心另一端，读数和单位断成两截。
+        check("justify-content:flex-start" in seg_num,
+              "editorial：百分号贴着数字排（不再 space-between）", seg_num[:140])
+        i_pct = style.index(".ns-pre-pct{")
+        seg_pct = style[i_pct:style.index("}", i_pct)]
+        check("clamp(22px," in seg_pct,
+              "editorial：百分号有下限字号（原先 2vw 在窄屏触底到 13px）",
+              seg_pct[:140])
+        # 标识在窄屏收一档，别压过唯一的读数。
+        check("@media(max-width:640px){.ns-pre-mark{width:32px}}" in style,
+              "editorial：标识在窄屏收到 32px")
 
     if menu_mode == "frost":
         # frost 的骨架：四团彩晕 + 暗网格 + 颗粒 + 上置序号。少一层就不是磨砂了。
@@ -252,7 +290,7 @@ def static_checks() -> None:
             ("--ns-menu-gut:max(24px,", "frost：量度变量在（导航左对齐收在量度内）"),
             ("radial-gradient(", "frost：彩晕层在"),
             ("feTurbulence", "frost：颗粒是 feTurbulence 现生成的，不是外链贴图"),
-            ("isolation:isolate", "frost：建了独立层叠上下文（颗粒层 z-index:-1 才不捅穿）"),
+            ("isolation:isolate", "frost：建了独立层叠上下文（颗粒层 z-index:-1 才不捕穿）"),
             ("a:focus-visible{outline", "frost：补了键盘焦点框（上游整站一次没写过）"),
         ]:
             check(frag_txt in style, label)
@@ -274,6 +312,45 @@ def static_checks() -> None:
               "frost：没有 backdrop-filter（背后是 3D 场景，模糊它纯亏）")
         check("transition-delay" not in style,
               "frost：错峰复用上游的 delay-200/250/300/350，没另起一套")
+
+    if menu_mode == "paper":
+        # paper 的骨架：一张象牙纸 + 四团极淡的水彩 + 暗网格 + 浅面颗粒，
+        # 上面压墨字。少一层就退回「白底一堆链接」。
+        for frag_txt, label in [
+            ("background-color:#f2ede3", "paper：象牙纸是实底铺的，不是渐变"),
+            ("counter-reset:ns-menu", "paper：导航列建了计数器"),
+            ("content:counter(ns-menu,decimal-leading-zero)",
+             "paper：序号是计数器生成的，没跟条目数绑死"),
+            ("--ns-menu-gut:max(24px,", "paper：量度变量在（导航左对齐收在量度内）"),
+            ("feTurbulence", "paper：颗粒是 feTurbulence 现生成的，不是外链贴图"),
+            ("isolation:isolate", "paper：建了独立层叠上下文（颗粒层 z-index:-1 才不捕穿）"),
+            ("a:focus-visible{outline", "paper：补了键盘焦点框（上游整站一次没写过）"),
+        ]:
+            check(frag_txt in style, label)
+        # 白字是上游 .text-white 打的。注入规则的特异度 (0,2,1) 已经压过它，
+        # 一行 color 就够，不需要 !important。
+        check(".mobile-menu.mobile-menu a{color:#14120f}" in style,
+              "paper：文字改成墨色，且没有靠 !important 硬压")
+        check("!important" not in style.split(".mobile-menu.mobile-menu")[1][:3000],
+              "paper：菜单这段一个 !important 都没用")
+        # 四团水彩缺一角就退化成斜向渐变；两层网格是横竖两向。
+        corners = ["at 0% 0%", "at 100% 0%", "at 0% 100%", "at 100% 100%"]
+        check(all(c in style for c in corners),
+              "paper：四个角都有水彩（缺角就退化成斜向渐变）",
+              str([c for c in corners if c not in style]))
+        check(style.count("radial-gradient(") >= 4, "paper：四团水彩都在",
+              str(style.count("radial-gradient(")))
+        # 序号与条目并排（grid 两列），不是 frost 那样打在上方。
+        i_a = style.index(">a{")
+        check("grid-template-columns:auto 1fr" in style[i_a:i_a + 260],
+              "paper：序号与条目并排成两列（auto 1fr）", style[i_a:i_a + 80])
+        # 关闭图标和 logo 是白色 SVG/PNG，压在纸上必须反色，否则整个不见了。
+        check("filter:brightness(0)" in style,
+              "paper：白色图标在纸底上反成黑色")
+        check("@supports selector(:has(*))" in style,
+              "paper：logo 反色裹在 :has() 特性检测里（老浏览器不至于变白丢字）")
+        check("transition-delay" not in style,
+              "paper：错峰复用上游的 delay-200/250/300/350，没另起一套")
 
     if menu_mode == "ink":
         # 这三条是 ink 版式的骨架，任何一条掉了都会退回「一堆居中链接」。
@@ -368,6 +445,26 @@ const tap = () => {
       bgColor: getComputedStyle(document.querySelector('.preloader')).backgroundColor,
       numFamily: getComputedStyle(v).fontFamily,
       numStyle: getComputedStyle(v).fontStyle,
+      numJustify: (() => {
+        const n = document.querySelector('.ns-pre-num');
+        return n ? getComputedStyle(n).justifyContent : '';
+      })(),
+      // 百分号原先被 space-between 甩到版心另一端。这里量的是「%」左缘到
+      // 数字盒右缘的距离；数字盒带 -.18em 负 margin，贴住时应当是负值。
+      pctGap: (() => {
+        const p = document.querySelector('.ns-pre-pct');
+        if (!p) return null;
+        return Math.round(p.getBoundingClientRect().left
+                          - v.getBoundingClientRect().right);
+      })(),
+      numSize: parseFloat(getComputedStyle(v).fontSize),
+      pctSize: parseFloat((document.querySelector('.ns-pre-pct')
+          ? getComputedStyle(document.querySelector('.ns-pre-pct')).fontSize
+          : '0')),
+      markWidth: (() => {
+        const m = document.querySelector('.ns-pre-mark');
+        return m ? Math.round(m.getBoundingClientRect().width) : null;
+      })(),
     };
   }
   if (v) {
@@ -466,6 +563,24 @@ MENU_PROBE = """() => {
     linkDelays: links.map(a => getComputedStyle(a).transitionDelay),
     linkOpacity: [...m.querySelectorAll('a')]
         .map(a => Number(getComputedStyle(a).opacity)),
+    // 文字色不再恒是白的：paper 是墨字压纸底。实拍对比度按这个色去算。
+    linkColor: a0 ? getComputedStyle(a0).color : '',
+    linkDisplay: a0 ? getComputedStyle(a0).display : '',
+    linkCols: a0 ? getComputedStyle(a0).gridTemplateColumns : '',
+    // 关闭图标与 logo 都是白色位图，压在纸上必须反色。
+    closeFilter: (() => {
+      const e = document.querySelector('.mobile-menu-button img');
+      return e ? getComputedStyle(e).filter : '';
+    })(),
+    logoFilter: (() => {
+      const e = document.querySelector('.logo-wrapper img');
+      return e ? getComputedStyle(e).filter : '';
+    })(),
+    socialColors: (() => {
+      const row = m.children[2];
+      return row ? [...row.querySelectorAll('a')]
+          .map(a => getComputedStyle(a).color) : [];
+    })(),
   };
 }"""
 
@@ -517,7 +632,7 @@ def sample_pixels(ctx, png: bytes, points, radius: int = SAMPLE_RADIUS):
     return px
 
 
-def preloader_checks(page, label: str, style: str) -> None:
+def preloader_checks(page, label: str, style: str, numerals: str = "sans") -> None:
     """加载页：结构 → 进度 → 揭幕。三段都要过。"""
     ssr = page.evaluate("() => window.__ssr")
     check(bool(ssr) and "ns-pre" in ssr.get("cls", ""),
@@ -531,11 +646,37 @@ def preloader_checks(page, label: str, style: str) -> None:
     if style == "editorial":
         check(bool(ssr) and ssr.get("bgColor") == "rgb(242, 237, 227)",
               f"{label}：象牙纸铺底（不是渐变，是一张纸）", str(ssr and ssr.get("bgColor")))
-        check(bool(ssr) and ssr.get("numStyle") == "italic",
-              f"{label}：数字是斜体", str(ssr and ssr.get("numStyle")))
-        check("TheSeasons" in str(ssr and ssr.get("numFamily")),
-              f"{label}：数字用的是衬线 TheSeasons（预载就是为了它）",
-              str(ssr and ssr.get("numFamily")))
+        fam = str(ssr and ssr.get("numFamily"))
+        if numerals == "display":
+            check(bool(ssr) and ssr.get("numStyle") == "italic",
+                  f"{label}：numerals=display 时数字是斜体",
+                  str(ssr and ssr.get("numStyle")))
+            check("TheSeasons" in fam,
+                  f"{label}：numerals=display 时数字落在衬线 TheSeasons 上", fam)
+        else:
+            # 那套衬线体是 FSP DEMO 试用版，4 号字形是水印图案，进度一到含 4
+            # 的值就在最大的那个数字上盖出「花瓣 + DEMO」。默认换成 TTNeoris。
+            check(bool(ssr) and ssr.get("numStyle") == "normal",
+                  f"{label}：数字是正体（试用版衬线体的 4 是水印）",
+                  str(ssr and ssr.get("numStyle")))
+            check("TTNeoris" in fam and "TheSeasons" not in fam,
+                  f"{label}：数字真的落在 TTNeoris 上，没回退到带水印的衬线体", fam)
+        check(ssr and ssr.get("numJustify") == "flex-start",
+              f"{label}：百分号贴着数字排（不再 space-between）",
+              str(ssr and ssr.get("numJustify")))
+        gap = ssr and ssr.get("pctGap")
+        size = (ssr and ssr.get("numSize")) or 1
+        check(gap is not None and gap < 0.15 * size,
+              f"{label}：百分号没被甩到版心另一端",
+              f"间距 {gap}px  数字字号 {size:.0f}px")
+        check((ssr and ssr.get("pctSize") or 0) >= 20,
+              f"{label}：百分号有下限字号（原先 2vw 在窄屏触底到 13px）",
+              str(ssr and ssr.get("pctSize")))
+        vw = page.viewport_size["width"]
+        want_mark = 32 if vw <= 640 else 48
+        check((ssr and ssr.get("markWidth")) == want_mark,
+              f"{label}：标识在 {vw}px 宽下是 {want_mark}px（别压过唯一的读数）",
+              str(ssr and ssr.get("markWidth")))
     else:
         check(bool(ssr) and "gradient" in ssr.get("bg", ""),
               f"{label}：背景是自定义渐变", str(ssr and ssr.get("bg")))
@@ -586,7 +727,7 @@ def menu_checks(ctx, page, mode: str) -> None:
           "菜单真有背景（上游那条规则被 Sass 注释废掉了，实测是完全透明）",
           st["bgImage"][:60])
     check(st["isolation"] == "isolate",
-          "建了独立层叠上下文（噪点层的 z-index:-1 才不会捅穿父级）",
+          "建了独立层叠上下文（噪点层的 z-index:-1 才不会捕穿父级）",
           st["isolation"])
     check(all(o > 0.6 for o in st["linkOpacity"]) if st["linkOpacity"] else False,
           "菜单里的链接没有被压暗到读不清",
@@ -659,18 +800,62 @@ def menu_checks(ctx, page, mode: str) -> None:
         check(len(set(st["linkDelays"])) == 4,
               "frost：错峰入场还在（复用上游 delay-*，没被覆盖成同一个值）",
               str(st["linkDelays"]))
+    elif mode == "paper":
+        check(st["afterZ"] == "-1", "paper：颗粒层压在内容底下", st["afterZ"])
+        check("data:image/svg+xml" in st["afterBgImage"],
+              "paper：颗粒是内联 SVG data URI（不额外发请求）",
+              st["afterBgImage"][:60])
+        # 浅面颗粒标定在 .34：比暗面高，因为浅底上人眼对颗粒没那么敏感。
+        op = float(st["afterOpacity"] or 0)
+        check(0.20 <= op <= 0.45,
+              "paper：浅面颗粒强度落在标定区间内", st["afterOpacity"])
+        check(st["bgImage"].count("radial-gradient") == 4,
+              "paper：四团水彩都进了 computed 背景",
+              str(st["bgImage"].count("radial-gradient")))
+        check(st["bgImage"].count("linear-gradient") >= 2,
+              "paper：横竖两向网格都在",
+              str(st["bgImage"].count("linear-gradient")))
+        check(parse_rgb(st["bgColor"]) == (242, 237, 227),
+              "paper：底色就是那张象牙纸", st["bgColor"])
+        check(parse_rgb(st["linkColor"]) == (20, 18, 15),
+              "paper：导航是墨字（上游的 .text-white 已被压过）", st["linkColor"])
+        check(st["linkCount"] == 4, "paper：四条导航都在索引表里", str(st["linkCount"]))
+        check(st["navCounterReset"].startswith("ns-menu"),
+              "paper：导航列建了计数器", st["navCounterReset"])
+        check("counter(ns-menu" in st["numContentBefore"],
+              "paper：序号由 ::before 的计数器生成（computed 里 counter() 不求值）",
+              st["numContentBefore"])
+        check(st["linkDisplay"] == "grid" and len(st["linkCols"].split()) == 2,
+              "paper：序号与条目并排成两列", f'{st["linkDisplay"]} / {st["linkCols"]}')
+        # 白色位图压在纸上不反色等于整个消失。
+        check("brightness(0)" in st["closeFilter"],
+              "paper：关闭图标反成黑色（白 SVG 压在纸上会消失）", st["closeFilter"])
+        check("brightness(0)" in st["logoFilter"],
+              "paper：菜单打开时 logo 跟着反色（:has() 命中）", st["logoFilter"])
+        # 社交行原来是 opacity-61 的白字压纸底 ≈ 1.6:1。改成实色淡墨。
+        socials = [parse_rgb(c) for c in st["socialColors"]]
+        worst_social = min((contrast(c, (242, 237, 227))
+                            for c in socials if c), default=0)
+        check(worst_social >= 4.5,
+              "paper：社交行那排淡字在纸上仍到 AA",
+              f"最差 {worst_social:.2f}:1  {st['socialColors']}")
+        check(len(set(st["linkDelays"])) == 4,
+              "paper：错峰入场还在（复用上游 delay-*，没被覆盖成同一个值）",
+              str(st["linkDelays"]))
     else:
         check(st["afterZ"] == "-1", "噪点层压在内容底下", st["afterZ"])
 
-    # frost / ink 是压着白字算过对比度的（构建期低于 7:1 直接报错），实拍也按 7 收；
-    # 其余预设只守 AA。
-    floor = 7.0 if mode in ("frost", "ink") else 4.5
+    # 自家三套预设都是构建期压着实际文字色算过对比度的（低于 7:1 直接报错），
+    # 实拍也按 7 收；其余预设只守 AA。文字色不写死 —— paper 是墨字压纸底，
+    # 按白字采样会永远得到 1.2:1。
+    ink = parse_rgb(st["linkColor"]) or (255, 255, 255)
+    floor = 7.0 if mode in ("frost", "ink", "paper") else 4.5
     png = page.screenshot()
     px = sample_pixels(ctx, png, SAMPLE_POINTS)
-    ratios = [contrast((255, 255, 255), c) for c in px]
+    ratios = [contrast(ink, c) for c in px]
     worst = min(ratios)
     check(worst >= floor,
-          f"实拍像素上白字对比度 ≥ {floor:g}:1",
+          f"实拍像素上文字色 rgb{ink} 对比度 ≥ {floor:g}:1",
           f"最差 {worst:.2f}:1  采样 {[f'{r:.1f}' for r in ratios]}")
 
 
@@ -685,6 +870,7 @@ def main() -> int:
     expected = story_texts()
     BASE = site["meta"].get("basePath", "/")
     pre_style = site.get("preloader", {}).get("style", "editorial")
+    pre_numerals = site.get("preloader", {}).get("numerals", "sans")
     menu_mode = site.get("menu", {}).get("background", "frost")
 
     static_checks()
@@ -782,7 +968,7 @@ def main() -> int:
             check(page.url == nav_before, "没有触发前端路由", page.url)
 
             # -------------------------------------------------- 5 加载页
-            preloader_checks(page, "加载页", pre_style)
+            preloader_checks(page, "加载页", pre_style, pre_numerals)
 
             # -------------------------------------------------- 6 移动端菜单
             if mobile:

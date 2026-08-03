@@ -15,7 +15,7 @@ const { SRC } = require('../paths');
 const {
   buildPreloader, nodes, toHtml, toVnode, solveFaint, worstPaper,
   PRELOADER_DEFAULTS, PRELOADER_CLASSES, STYLES, SCOPE, PAPER_INK_MIN, PAD, CUT,
-  FAINT_TEXT_MIN, FAINT_NUM_MIN, FEATHER, WASH_DARK,
+  FAINT_TEXT_MIN, FAINT_NUM_MIN, FEATHER, WASH_DARK, NUMERALS, DEMO_GLYPHS,
 } = require('../preloader');
 const { contrast, over } = require('../color');
 const { normalizeSite } = require('../assets');
@@ -204,11 +204,52 @@ test('preloader: 默认走 editorial，纸色铺底、墨色排字，深蓝那�
   ok(!base.css.includes('ns-pre-pulse'), 'editorial 不要那个循环脉冲动画');
 });
 
-test('preloader: editorial 的数字用衬线斜体，百分号退回无衬线正体', () => {
-  ok(/\.ns-pre-num\{[^}]*font-family:var\(--font-serif\)/.test(base.css), 'ns-pre-num 没用衬线');
-  ok(/\.ns-pre-num\{[^}]*font-style:italic/.test(base.css), 'ns-pre-num 没用斜体');
-  ok(/\.ns-pre-pct\{[^}]*font-family:var\(--font-sans-regular\)/.test(base.css), 'ns-pre-pct 没退回无衬线');
-  ok(/\.ns-pre-pct\{[^}]*font-style:normal/.test(base.css), 'ns-pre-pct 没退回正体');
+test('preloader: 数字默认用无衬线，因为捆的衬线体是把 4 换成水印的试用版', () => {
+  ok(/\.ns-pre-num\{[^}]*font-family:var\(--font-sans-regular\)/.test(base.css), 'ns-pre-num 没用无衬线');
+  ok(/\.ns-pre-num\{[^}]*font-style:normal/.test(base.css), 'ns-pre-num 没用正体');
+  ok(!/\.ns-pre-num\{[^}]*font-style:italic/.test(base.css), 'ns-pre-num 不该还是斜体');
+  ok(/\.ns-pre-pct\{[^}]*font-family:var\(--font-sans-regular\)/.test(base.css), 'ns-pre-pct 没用无衬线');
+  ok(/\.ns-pre-pct\{[^}]*font-style:normal/.test(base.css), 'ns-pre-pct 没用正体');
+});
+
+test('preloader: numerals:display 换回衬线斜体，但要给一条试用版告警', () => {
+  const d = buildPreloader({ preloader: { numerals: 'display' } });
+  eq(d.errors.length, 0, JSON.stringify(d.errors));
+  ok(/\.ns-pre-num\{[^}]*font-family:var\(--font-serif\)/.test(d.css), 'display 没换回衬线');
+  ok(/\.ns-pre-num\{[^}]*font-style:italic/.test(d.css), 'display 没换回斜体');
+  // 告警必须点名字体文件和"数字 4"，否则读的人不知道该去查什么。
+  eq(d.warnings.length, 1, JSON.stringify(d.warnings));
+  ok(d.warnings[0].includes(DEMO_GLYPHS), '告警没点名是哪份字体');
+  ok(d.warnings[0].includes('4'), '告警没说清是数字 4 被换成了水印');
+  // 默认那条路不该有任何告警。
+  eq(base.warnings.length, 0, JSON.stringify(base.warnings));
+});
+
+test('preloader: numerals 拼错直接报错，不静默换套字', () => {
+  const bad = buildPreloader({ preloader: { numerals: 'serif' } });
+  ok(bad.errors.some((e) => e.includes('numerals')), JSON.stringify(bad.errors));
+  ok(bad.errors.some((e) => e.includes('sans') && e.includes('display')), '没列出可选值');
+  // 报错之后仍然回退到默认的 sans，CSS 不能是空的。
+  ok(/\.ns-pre-num\{[^}]*font-family:var\(--font-sans-regular\)/.test(bad.css), '没回退到 sans');
+});
+
+test('preloader: 百分号贴着数字，不再被 space-between 甩到版心另一端', () => {
+  // 移动端 390px 下，space-between 会让 13px 的百分号和数字之间空出 150px，
+  // 读起来像布局出了 bug。回到 flex-start + 小 gap。
+  ok(/\.ns-pre-num\{[^}]*justify-content:flex-start/.test(base.css), 'ns-pre-num 没改回 flex-start');
+  ok(!/\.ns-pre-num\{[^}]*space-between/.test(base.css), 'ns-pre-num 还在用 space-between');
+  // 疏排是为了顶右缘用的，贴回数字旁边之后单字符疏排只会在右边多留一道空。
+  ok(/\.ns-pre-pct\{[^}]*letter-spacing:0/.test(base.css), 'ns-pre-pct 的疏排没归零');
+  ok(!/\.ns-pre-pct\{[^}]*margin:0 -\.24em/.test(base.css), 'ns-pre-pct 还带着补回疏排的负 margin');
+  // 字号下限要撑得住移动端：clamp 的第一个值就是 390px 屏上的实际值。
+  ok(/\.ns-pre-pct\{[^}]*font-size:clamp\(22px,/.test(base.css), 'ns-pre-pct 的字号下限没提上来');
+});
+
+test('preloader: 标识在窄屏收到 32px，别压过唯一的读数', () => {
+  ok(/\.ns-pre-mark\{[^}]*width:48px/.test(base.css), '桌面下不是 48px');
+  ok(/@media\(max-width:640px\)\{\.ns-pre-mark\{width:32px\}\}/.test(base.css), '窄屏没收到 32px');
+  // 48 和 32 都要是 4 的倍数：标识是 4×4 网格上的 12 个方块，每格才落整像素。
+  ok(48 % 4 === 0 && 32 % 4 === 0, '标识宽度必须是 4 的倍数');
 });
 
 test('preloader: editorial 里 --ns-pre-p 只驱动字形分界点这一处', () => {
@@ -440,6 +481,9 @@ test('preloader: 上游那段 hideReadyPreloader 轮询脚本被整段换掉了'
 
 test('preloader: 默认值自洽（style 合法、颜色齐全）', () => {
   ok(STYLES.has(PRELOADER_DEFAULTS.style));
+  ok(NUMERALS.has(PRELOADER_DEFAULTS.numerals));
+  // 默认必须是 sans：display 那套字的数字 4 是水印，不能当默认发出去。
+  eq(PRELOADER_DEFAULTS.numerals, 'sans');
   eq(PRELOADER_DEFAULTS.background.length, 3);
   eq(PRELOADER_DEFAULTS.glow.length, 2);
 });

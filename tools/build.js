@@ -318,7 +318,10 @@ function build({ log = console.log } = {}) {
       + `${scene.sections.reduce((a, x) => a + x.lg, 0)}，移动端合计 `
       + `${scene.sections.reduce((a, x) => a + x.xs, 0)}`);
     log(`  强调样式   ${theme.mode}`);
-    log(`  菜单背景   ${menu.mode}${menu.contrast ? `（白字对比度 ${menu.contrast}:1）` : ''}`);
+    // paper 是墨字压纸底，其余预设都是白字压暗底 —— 报「白字对比度」会把
+    // 读摘要的人带沟里，按 mode 分流。
+    log(`  菜单背景   ${menu.mode}${menu.contrast
+      ? `（${menu.mode === 'paper' ? '墨字' : '白字'}对比度 ${menu.contrast}:1）` : ''}`);
     log(`  加载页     ${pre.style}（${PRE_LABEL[pre.style] || '真实进度'}）`);
     log(`  水晶       ${crystals.palette}（${crystals.label}）`
       + `${crystals.anchors.length ? '' : ' — 与上游一致，未下补丁'}`);
@@ -330,6 +333,7 @@ function build({ log = console.log } = {}) {
       for (const j of swapped) log(`               ${path.relative(ROOT, j.src)} → ${j.out}`);
     }
     for (const w of menu.warnings) log(`  ⚠ ${w}`);
+    for (const w of pre.warnings || []) log(`  ⚠ ${w}`);
     for (const w of crystals.warnings) log(`  ⚠ ${w}`);
     for (const w of creatures.warnings) log(`  ⚠ ${w}`);
   }
